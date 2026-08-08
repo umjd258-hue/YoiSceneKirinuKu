@@ -388,3 +388,46 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - FFmpeg子プロセスの起動、監視、停止および異常終了時の管理方式は未検証とし、Python → FFmpegを初めて本実装する段階の開始Gateまでに技術検証し、正式決定する。
 - 今回の実験でtimeout時の後始末に使用した `terminate()` は、本番の停止方式として採用しない。
 - SwiftおよびClangのmodule cacheを本番でどこへ配置し、どのように扱うかは未決定とする。検証時の `/private/tmp/yoi-scene-swift-python-module-cache` 指定は、検証環境の書込み制約を回避するためだけの措置であり、本番アーキテクチャとして採用しない。
+
+### 17.2 Python → FFmpeg subprocess 技術検証結果
+
+`experiments/python-ffmpeg-subprocess/` の限定的な実験により、次の技術的成立性を確認した。
+
+#### 検証環境の記録
+
+- Python 3.13.14: `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3`
+- FFmpeg 8.1.2: 入力パス `/opt/homebrew/bin/ffmpeg`、実体パス `/opt/homebrew/Cellar/ffmpeg/8.1.2_1/bin/ffmpeg`
+- ffprobe 8.1.2: 入力パス `/opt/homebrew/bin/ffprobe`、実体パス `/opt/homebrew/Cellar/ffmpeg/8.1.2_1/bin/ffprobe`
+
+これらのversionと絶対パスは今回のローカル検証環境の記録であり、Homebrew版、`/opt/homebrew/bin/`、Cellar内のパスを本番配置または本番依存として採用しない。
+
+#### 確認済みの事実
+
+- 今回のローカル環境ではFFmpeg 8.1.2とffprobe 8.1.2が存在し、実行可能だった。
+- Python 3.13.14からFFmpegとffprobeを起動できた。
+- Python標準ライブラリの `subprocess.run()` を候補として、`shell=False` かつ実行ファイルと引数を分離した配列で起動できた。
+- 日本語と空白を含むファイルパスを1つの引数として渡し、生成、FFmpeg読取り、ffprobe解析を実行できた。
+- stdout、stderr、終了コードを分離して取得できた。
+- FFmpegがstderrへ処理情報を出力すること自体を失敗条件にせず、終了コードと成果物検証を組み合わせられた。
+- 存在しない実行ファイルによるプロセス起動失敗と、起動後のFFmpeg非0終了を区別できた。
+- ffprobeのJSON出力をPythonでparseし、video stream、audio stream、正のdurationを機械的に確認できた。
+- FFmpegの終了コードだけでなく、成果物の存在、非空、FFmpegによる読取り、ffprobeによる検証を組み合わせて確認できた。
+- 今回の人工メディア生成では `-n` を指定し、既存出力を黙って上書きしない動作を確認した。
+- 外部依存の追加および外部アクセスなしで、上記の成立性を確認できた。
+
+人工メディア生成に使用したmpeg4、aac、160×90、10fps、2秒、48kHz、lavfi入力およびその他の具体的なFFmpeg引数は、技術検証専用の実験値である。本番codec、本番FFmpeg引数、解析用WAV仕様、完成MP4仕様その他の本番メディア仕様として採用しない。
+
+`subprocess.run()` は今回の短時間処理で成立性を確認した候補方式であり、本番の長時間FFmpeg処理、停止、強制終了、Process group管理まで含めた最終方式として確定しない。実測の詳細は `experiments/python-ffmpeg-subprocess/RESULTS.md` を参照する。
+
+#### 未検証・未決定の事項
+
+- FFmpegとffprobeの最終配置・同梱方式、およびHomebrew版へ本番依存するかは未決定とする。
+- Pythonの最終配置・同梱方式は未決定とする。
+- App SandboxおよびSecurity-Scoped Bookmarkの採否は未決定とする。
+- 本番codec、本番FFmpeg引数、解析用WAV正式仕様、完成MP4保存方式は未決定とする。
+- FFmpegの長時間処理は未検証とする。
+- FFmpeg停止signal、停止猶予時間、強制終了方式は未決定とする。
+- Process groupおよび子プロセス管理方式は未決定とする。
+- SDカード切断中のFFmpeg挙動は未検証とする。
+
+これらは対応する本実装より前の開始Gateで、必要な追加検証結果をもとに正式決定する。今回の短時間実験から実装者が推測で確定しない。
