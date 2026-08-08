@@ -46,3 +46,42 @@
 - Python／FFmpeg／ffprobe／AIモデルの完成版配置・同梱方式。
 - 本番bufferサイズ、Queue／Concurrency方式、停止signal、猶予時間、強制終了方式、停止完了event形式。
 - フレーム境界補正、候補区間の結合・分割、FFmpeg引数へ時刻を戻す規則。
+
+---
+
+## 2026-08-09：第3段階開始Gateの正式決定
+
+### 対象Stage
+
+第3段階「MP4選択とPreflight」
+
+### 決定事項
+
+- 先行する「第3段階開始Gateの仕様検討」に記録した推奨案を、第3段階に必要な範囲で正式採用した。
+- 永続JSONは `schema_version: 1`、通信は `protocol_version: 1`、安定IDは小文字・ハイフン付きUUID v4とした。
+- 時刻と時間長は非負の64-bit整数ミリ秒とし、`start_ms`、`end_ms`、`duration_ms`、開始切り下げ、終了・時間長切り上げを採用した。
+- Preflightは1要求1Pythonプロセス、stdinのJSON要求、ffprobeによる読み取り専用検査、video／audio streamと正のdurationを含む複合成功判定とした。
+- Preflight deadlineは30秒、Pythonからのffprobe待機上限は20秒とした。timeout後始末は対象のPreflightプロセスだけに限定し、解析停止契約とは分離した。
+- Preflight error codeと日本語文言、Stage 3用JSON Lines event schema、protocol violation、process exitを含む正式成功条件を決定した。
+- Swift→PythonはFoundation `Process`、shellなし、独立Pipe、Service所有をPreflightの正式方式とした。
+- Pythonとffprobeの開発時絶対パスはDebug用設定から注入し、Preflight用PythonソースはアプリResourceとする。環境固有パスはハードコードしない。
+- 第3段階からの初期開発構成はApp Sandboxなしとした。配布版の最終採否とは分離する。
+
+### 理由
+
+- 既存の技術検証で、SandboxなしのFoundation `Process`、大量stdout／stderr同時逐次読取り、Python→ffprobeが外部依存追加なしで成立している。
+- 未成立のSandboxあり署名構成をPreflight実装へ混在させず、機能と配布・署名問題を分離する必要がある。
+- `finished`、終了コード、拡張子のいずれか1つだけに依存せず、安全な失敗と複合成功判定を最小契約で実現するため。
+
+### 後続Gateへ残す未決定事項
+
+- 各永続JSON固有の全schema、ID生成時点と参照関係。
+- フレーム境界補正、候補区間の生成・結合・分割、FFmpeg引数への時刻変換。
+- 本番bufferサイズ、Queue／Concurrency、長時間解析の停止signal・猶予時間・強制終了・Process group、停止完了event形式。
+- Python／FFmpeg／ffprobe／AIモデルの完成版配置・同梱方式。
+- 配布版App Sandbox、正式署名条件での再検証、Security-Scoped Bookmark。
+- スリープ抑止、外部SDカード切断・再接続、保存reconciliation。
+
+### Gate判定
+
+正本仕様への反映完了後、第3段階の開始Gateは通過とする。第3段階の実装は別作業として開始する。

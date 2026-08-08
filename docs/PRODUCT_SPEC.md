@@ -201,7 +201,9 @@ partialしか存在しない工程は最初から実行する。
 
 永続JSONにはschema versionを持たせる。永続データ間の参照には、表示名や配列位置ではなく安定した一意IDを使用する。
 
-動画内時刻と時間長の基準表現は整数ミリ秒を第一候補とする。具体的なキー名、丸め規則、schema version番号、ID形式は未決定とし、第3開始前までに `ARCHITECTURE.md` で正式決定する。
+永続JSONの初期schema versionは整数 `1` とし、トップレベルの `schema_version` へ格納する。安定した一意IDは小文字・ハイフン付きUUID v4文字列とする。
+
+動画内時刻と時間長の基準表現は非負の64-bit整数ミリ秒とし、`start_ms`、`end_ms`、`duration_ms` を使用する。秒から変換する場合、開始は切り下げ、終了と時間長は切り上げる。区間は `start_ms < end_ms` とする。フレーム境界補正等の後続処理固有規則は、対応する開始Gateで決定する。
 
 未知schema、壊れたJSON、必須項目が不足したJSONを推測で正常処理しない。
 
@@ -219,12 +221,12 @@ partialしか存在しない工程は最初から実行する。
 
 初期版は完全ローカル処理を維持し、App Store配布を前提としない。
 
-以下は未決定の技術検証事項とし、Codexが独自に確定してはならない。
+第3段階の初期開発構成ではApp Sandboxを無効とする。これはApp Store配布を前提としない開発時の決定であり、配布版の最終採否ではない。配布版のApp SandboxとSecurity-Scoped Bookmarkは第22開始Gateまで未決定とする。
 
-- App Sandboxあり／なし
-- SwiftからPython subprocessを起動する方式
+以下は引き続き未決定の技術検証事項とし、Codexが独自に確定してはならない。
+
 - PythonからFFmpegを実行する方式
-- Python、FFmpeg、AIモデルの配置・同梱方式
+- Python、FFmpeg、ffprobe、AIモデルの完成版配置・同梱方式
 - 外部SDカードへの読み書き方式
 - Security-Scoped Bookmarkの採否
 - Macスリープ抑止方式

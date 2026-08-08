@@ -62,20 +62,54 @@ Python側は主に以下を担当する。
 
 同じ正式ファイルをSwift/Python双方から更新する設計にしない。
 
+### 4.1 第3段階Preflight正式契約
+
+Preflightは1要求につき1つのPythonプロセスを起動する。Swiftはstdinへ次の必須項目を持つUTF-8 JSON objectを1件だけ送り、入力を閉じる。
+
+```json
+{
+  "protocol_version": 1,
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "operation": "preflight",
+  "source_path": "/absolute/path/video.mp4"
+}
+```
+
+- `request_id` は小文字・ハイフン付きUUID v4文字列とする。
+- `source_path` は絶対パスとし、Pythonは対象を読み取り専用で扱う。
+- 入力schema不適合、余分な要求、未知operationを推測で処理しない。
+- Swiftは選択と要求寿命を所有し、古い `request_id` の結果を現在の選択へ反映しない。
+
+Preflightは次をすべて満たした場合だけ成功とする。
+
+1. 入力が正式schemaに適合する。
+2. 対象が存在する通常ファイルで、読み取り可能である。
+3. 拡張子が大文字・小文字を問わず `.mp4` である。
+4. ffprobeを起動でき、終了コードが0である。
+5. ffprobe JSONが構文・必須項目・型の検証に合格する。
+6. MP4系containerとして認識される。
+7. video streamとaudio streamがそれぞれ1件以上存在する。
+8. 有限かつ正のdurationを `duration_ms` へ変換できる。
+
+Preflightは軽量な解析可能性確認であり、本解析の成功、全frameの完全性、対応codec、保存可能性を保証しない。元動画へ書き込まず、変換成果物も生成しない。
+
+第3段階のPreflight deadlineは要求開始から30秒とする。Pythonからのffprobe待機は20秒を上限とし、timeout時は対象のffprobeだけを終了・回収して `probe_timed_out` とする。Swift側で30秒を超えた場合は対象のPython `Process` だけへ `terminate()` を送り、終了を待って失敗扱いとする。この契約は短時間Preflightの異常後始末に限定し、第14段階の解析停止signal、猶予時間、強制終了方式またはProcess group契約を決定しない。
+
 ## 5. 永続データ共通契約
 
 永続JSONは次の原則に従う。
 
-- schema versionを必須とする。
-- 永続データ間の参照には安定した一意IDを使用する。
+- トップレベルの `schema_version` を必須とし、初期versionはJSON整数 `1` とする。
+- 永続データ間の参照には、小文字・ハイフン付きUUID v4文字列の安定した一意IDを使用する。
 - 表示名や配列位置を永続的な関連付けへ使用しない。
-- 動画内時刻と時間長の基準表現は整数ミリ秒を第一候補とする。
+- 動画内時刻と時間長は非負の64-bit整数ミリ秒とし、`start_ms`、`end_ms`、`duration_ms` を使用する。
+- 秒から開始時刻へ変換する場合は切り下げ、終了時刻と時間長は切り上げる。区間は `start_ms < end_ms` とする。
 - 未知schema、壊れたJSON、必須項目が不足したJSONを推測で正常処理しない。
 - 重要なJSONはpartialまたは一時ファイルへ書き、検証後に正式化する。
 
 ただし、重要資産ではない `selection.json` の破損については、`PRODUCT_SPEC.md` に従って標準の初期選択状態へ戻すことを明示的な例外とする。この復旧を解析結果や保存状態等の必須データへ拡張しない。
 
-schema versionの具体的な番号、ID形式、時刻キー名、丸め規則は未決定とする。第3開始前までに正式決定する。
+用途別IDのキー名は `request_id`、`job_id`、`character_id`、`sample_id`、`candidate_id` とする。一度正式化したIDを変更または再利用しない。各JSON固有の生成時点、参照関係、全フィールドは、そのJSONを初めて使用する開始Gateで正式決定する。
 
 主要JSONの責務は次のとおり分離する。
 
@@ -199,19 +233,34 @@ current_job/
 
 通常ログはstdoutへ出さず、stderrまたはログファイルへ出す。
 
+通信schemaと永続JSON schemaは別契約とし、通信の初期versionはJSON整数 `protocol_version: 1` とする。各eventは次の共通項目を必須とする。
+
+- `protocol_version`
+- `type`: `progress`、`error`、`finished` のいずれか
+- `request_id`: 要求と一致するUUID v4文字列
+- `sequence`: 1から始まり1ずつ増加する整数
+- `payload`: JSON object
+
 ### progress例
 
 ```json
 {
+  "protocol_version": 1,
   "type": "progress",
-  "stage": "speaker",
-  "status": "running",
-  "current": 42,
-  "total": 128
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "sequence": 1,
+  "payload": {
+    "stage": "preflight",
+    "status": "running"
+  }
 }
 ```
 
-工程完了は同じ `progress` で `status: "completed"` などを使用可能とする。
+第3段階では `progress.payload.stage` は `preflight`、`status` は `running` または `completed` とする。Preflightのprogress送信は任意であり、Swiftは要求開始時点で動画カードを確認中へ移す。
+
+`error.payload` は正式な `code` を必須とする。Preflight失敗時は1件の `error` の後、同じcodeを持つ `finished.payload.outcome: "failed"` を送る。技術例外文字列やffprobe stderrをstdout payloadへ含めない。
+
+Preflight成功時の `finished.payload` は、`outcome: "succeeded"` と、少なくとも `file_name`、`duration_ms`、`container_format`、`video_stream_count`、`audio_stream_count` を持つ `result` を必須とする。terminal `finished` は1件だけとする。
 
 通信は次の原則に従う。
 
@@ -219,6 +268,10 @@ current_job/
 - 通常ログはstdoutへ出さない。
 - 壊れたJSONや未知eventを通常ログとして読み飛ばし、正常処理を継続しない。
 - `finished` はプロセス側の処理終了通知であり、成果物の成功証明ではない。
+- 未知protocol version、malformed JSON、未知type、必須項目不足、型不一致、`request_id` 不一致、sequenceの重複・欠落・逆行、terminal event後のeventはprotocol violationとし、要求全体を `protocol_error` で失敗扱いにする。
+- protocol violation発生後に受信したeventを成功根拠に使用しない。
+
+第3段階のPreflight成功には、起動成功、protocol violationなし、要求と一致するID、`error`なし、妥当な `finished(outcome: succeeded)` とresult、process exit code 0、stdout／stderr双方のEOF確認をすべて必要とする。終了コード0だけ、または `finished` だけでは成功にしない。exit code非0、signal終了、起動失敗、terminal event欠落は失敗とする。
 
 停止完了を独立eventとして追加するか、既存の `progress` または `finished` に明確な終了理由を持たせるかは未決定とする。基本3種類との整合性を検証し、第14開始前までに正式決定する。独立eventを実装時に推測で追加しない。
 
@@ -230,7 +283,9 @@ Pythonは安定したエラーコードを返し、Swift側がユーザー向け
 
 詳細ログは開発・診断用として別経路に保持する。
 
-エラーコード体系、ユーザー向け文言との対応、ログ保存場所・保存期間・動画パスや人物名等の取扱いは未決定とする。各機能の本体接続前までに必要な範囲を正式決定する。
+第3段階のPreflight error codeは、`invalid_request`、`unsupported_file_type`、`input_not_found`、`input_not_readable`、`probe_not_started`、`probe_timed_out`、`probe_failed`、`invalid_probe_output`、`video_stream_missing`、`audio_stream_missing`、`invalid_duration`、`protocol_error`、`internal_error` とする。UI文言は `UI_SPEC.md` を正本とする。未知codeは成功扱いせず、Swiftで `internal_error` 相当の一般文言へ変換する。
+
+ログ保存場所・保存期間・動画パスや人物名等の取扱い、および後続機能固有のerror codeは未決定とし、対応する本体接続前までに正式決定する。
 
 ## 11. 完了判定
 
@@ -344,7 +399,13 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - FFmpeg同梱
 - 人物登録サンプルの適切な長さ
 
-初期版はApp Store配布を前提としないが、App Sandboxの採否は未決定とする。Python、FFmpeg、AIモデルの配置・同梱方式、Security-Scoped Bookmarkの採否、スリープ抑止方式も未決定とし、実装者が推測で確定しない。
+初期版はApp Store配布を前提としない。第3段階からの初期開発構成はApp Sandboxなしとする。これはSandboxなしのSwift→Python→FFmpegチェーンが限定実験で3回成立し、Sandboxありはad-hoc署名構成で起動前abort、有効な開発署名で未検証であるため、Preflight実装と署名問題を分離するための開発時決定である。Sandboxが技術的に不可能という判定ではなく、配布版の最終採否は第22開始Gateまで未決定とする。
+
+第3段階では、Foundation `Process` をSwift→Python subprocessの正式方式として採用する。`executableURL`と引数配列を分離し、shellを介さず、stdin／stdout／stderrを独立Pipeで扱い、stdout／stderrを実行中から読み、終了後に両EOFを確認する。ProcessはViewではなくServiceが所有する。この採用範囲はPreflightまでとし、長時間解析のbuffer、Queue、Concurrency、停止およびProcess group方式を決定しない。
+
+第3段階の開発時は、Pythonとffprobeの絶対パスをDebug用設定から注入し、起動前に絶対パス、通常ファイル、実行可能性を検証する。`PATH`探索、Homebrew固定パス、検証環境のCellarパスをソースへハードコードしない。Preflight用Pythonソースはプロジェクト所有のアプリResourceとする。Python、FFmpeg、ffprobe、AIモデルの完成版配置・同梱方式は第22開始Gateまで未決定とする。
+
+Security-Scoped Bookmark、配布版App Sandbox、スリープ抑止方式も未決定とし、対応する後続Gateで正式決定する。
 
 各検証には、検証目的、合格条件、影響する仕様、正式決定期限を設ける。検証成功だけで本体仕様を自動変更せず、結果を本書へ正式反映してから関連する本体実装を開始する。
 
@@ -386,8 +447,8 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - 今回より長時間または高負荷な条件でのstdout／stderr同時逐次読取りの挙動は未検証とする。今回成立した実験方式を本番実装方式として自動採用せず、Swift–Python通信を本接続する段階の開始Gateまでに必要な条件と正式方式を決定する。
 - 本番のbufferサイズ、Queue方式、Concurrency方式は未決定とし、今回の件数、payloadサイズ、出力間隔、64 KiBの読取りchunk上限から推測で決定しない。
 - Pythonの最終配置・同梱方式は未決定とし、Python subprocessを本体へ組み込む段階の開始Gateまでに正式決定する。
-- App Sandboxの採否は未決定とし、Python subprocess、外部SDカードI/Oその他の影響を受ける本実装より前のGateまでに正式決定する。
-- 本番のJSON Lines schema、およびmalformed JSON、unknown event、protocol violationへの正式な処理は未決定とし、Swift–Python通信を本接続する段階の開始Gateまでに正式決定する。
+- この技術検証時点ではApp Sandboxの採否は未決定だった。第3段階の開発構成と配布版の最終採否は、本書第17節冒頭の方針に従って分離する。
+- この技術検証時点ではJSON Lines schemaとprotocol violation処理は未決定だった。第3段階Preflightの正式契約は本書第9節に従い、後続段階で追加が必要な契約は対応する開始Gateで決定する。
 - 停止signal、猶予時間、強制終了方式は未決定とし、第14開始Gateまでに正式決定する。
 - FFmpeg子プロセスの起動、監視、停止および異常終了時の管理方式は未検証とし、Python → FFmpegを初めて本実装する段階の開始Gateまでに技術検証し、正式決定する。
 - 今回の実験でtimeout時の後始末に使用した `terminate()` は、本番の停止方式として採用しない。
@@ -548,7 +609,7 @@ SwiftPMの `--disable-sandbox` は、検証環境でSwiftPM自身のmanifest／b
 
 App Sandboxの採否、有効な開発署名または配布署名での挙動、本番の署名・配布方式、Python／FFmpeg／ffprobe／AIモデルの最終配置・同梱方式、Security-Scoped Bookmarkの採否、Sandbox下の外部ストレージアクセスおよび子プロセス停止方式は未検証・未決定のまま維持する。
 
-Sandboxなしで3回成功したことをApp Sandboxなしの正式採用根拠にせず、Sandboxありのad-hoc署名構成がabortしたことをApp Sandbox不採用の確定根拠にも使用しない。ファイル選択・subprocessへ影響する場合は第3開始Gate、最終採否は第22開始Gateまでに、利用可能な正式署名条件と配布条件に基づいて必要な再検証と正式決定を行う。この明示的な繰延べを前提に、有効な開発署名による再検証が未実施であることだけを理由として第0段階の完了を妨げない。
+Sandboxなしで3回成功したことだけを配布版App Sandboxなしの正式採用根拠にせず、Sandboxありのad-hoc署名構成がabortしたことをApp Sandbox不採用の確定根拠にも使用しない。第3段階の開発構成は本書第17節冒頭の方針に従い、最終採否は第22開始Gateまでに、利用可能な正式署名条件と配布条件に基づいて必要な再検証と正式決定を行う。この明示的な繰延べを前提に、有効な開発署名による再検証が未実施であることだけを理由として第0段階の完了を妨げない。
 
 ### 17.6 Source fingerprint候補比較検証結果
 

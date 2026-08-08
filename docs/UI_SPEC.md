@@ -146,6 +146,26 @@ episode01.mp4
 FFmpeg等の技術エラー文字列は表示しない。
 解析開始はdisabled。
 
+Preflightのerror codeとユーザー向け文言は次のとおりとする。括弧内の内部codeや技術例外は画面へ表示しない。
+
+| error code | ユーザー向け文言 |
+|---|---|
+| `invalid_request` | 動画を確認できませんでした |
+| `unsupported_file_type` | MP4ファイルを選んでください |
+| `input_not_found` | 選択した動画が見つかりません |
+| `input_not_readable` | この動画を読み込めません |
+| `probe_not_started` | 動画を確認できませんでした |
+| `probe_timed_out` | 動画の確認に時間がかかりすぎました |
+| `probe_failed` | この動画は解析できません |
+| `invalid_probe_output` | 動画情報を確認できませんでした |
+| `video_stream_missing` | 映像トラックが見つかりません |
+| `audio_stream_missing` | 音声トラックが見つかりません |
+| `invalid_duration` | 動画の長さを確認できません |
+| `protocol_error` | 動画の確認処理で問題が発生しました |
+| `internal_error` | 動画を確認できませんでした |
+
+未知のerror codeは成功扱いせず、`internal_error` と同じ一般文言で失敗表示する。診断情報はUIへ出さない。
+
 ## 9. 人物表示
 
 ホームには選択中の人物だけをチップ表示する。
