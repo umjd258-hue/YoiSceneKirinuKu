@@ -363,14 +363,28 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - Python実行ファイルのパスを、Swift側の実験プログラムへの外部入力として渡せる。
 - 外部依存の追加および外部アクセスなしで、上記の成立性を確認できた。
 
+大量・長時間stdout／stderr同時逐次読取りについて、限定した検証条件で次の事実を確認した。
+
+- stdoutとstderrを子プロセス実行中から独立して逐次読み取りできた。
+- `burst`、`paced`、`trailing` の各3回、合計9試行がすべて成功した。
+- 全試行でstdoutとstderrそれぞれの期待件数と受信件数が一致した。
+- 欠落、重複、stream内順序違反、payload破損は発生しなかった。
+- stdoutとstderrそれぞれでsentinelを確認できた。
+- 子プロセス終了後もstdoutとstderrそれぞれのEOFまで待つことで、終了直前の残存データを回収できた。
+- timeout、デッドロック、ハングは発生しなかった。
+
+実験条件は、`burst` が1 streamあたり10,000件、1 recordあたり1,024 bytesを3回、`paced` が1 streamあたり3,000件、1 recordあたり512 bytes、1ms間隔を3回、`trailing` が1 streamあたり5,000件、1 recordあたり256 bytesを3回である。Swift実験コードの1回の読取りchunk上限は64 KiBとした。これらは実測範囲を示す実験値であり、本番bufferサイズ、通信量上限、Queue設計その他の本番仕様として採用しない。
+
 この確認はFoundationの `Process`、Pythonの配置、同梱方式その他の本番方式の最終採用を意味しない。実測の詳細は `experiments/swift-python-subprocess/RESULTS.md` を参照する。
 
 #### 未検証・未決定の事項
 
-- 大量または長時間のstdoutとstderrを、デッドロックを避けながら同時かつ逐次的に読み取る方式は未検証とする。Swift–Python通信を本接続する段階の開始Gateまでに検証し、正式決定する。
+- 今回より長時間または高負荷な条件でのstdout／stderr同時逐次読取りの挙動は未検証とする。今回成立した実験方式を本番実装方式として自動採用せず、Swift–Python通信を本接続する段階の開始Gateまでに必要な条件と正式方式を決定する。
+- 本番のbufferサイズ、Queue方式、Concurrency方式は未決定とし、今回の件数、payloadサイズ、出力間隔、64 KiBの読取りchunk上限から推測で決定しない。
 - Pythonの最終配置・同梱方式は未決定とし、Python subprocessを本体へ組み込む段階の開始Gateまでに正式決定する。
 - App Sandboxの採否は未決定とし、Python subprocess、外部SDカードI/Oその他の影響を受ける本実装より前のGateまでに正式決定する。
-- 本番のJSON Lines schemaは未決定とし、Swift–Python通信を本接続する段階の開始Gateまでに正式決定する。
+- 本番のJSON Lines schema、およびmalformed JSON、unknown event、protocol violationへの正式な処理は未決定とし、Swift–Python通信を本接続する段階の開始Gateまでに正式決定する。
 - 停止signal、猶予時間、強制終了方式は未決定とし、第14開始Gateまでに正式決定する。
 - FFmpeg子プロセスの起動、監視、停止および異常終了時の管理方式は未検証とし、Python → FFmpegを初めて本実装する段階の開始Gateまでに技術検証し、正式決定する。
+- 今回の実験でtimeout時の後始末に使用した `terminate()` は、本番の停止方式として採用しない。
 - SwiftおよびClangのmodule cacheを本番でどこへ配置し、どのように扱うかは未決定とする。検証時の `/private/tmp/yoi-scene-swift-python-module-cache` 指定は、検証環境の書込み制約を回避するためだけの措置であり、本番アーキテクチャとして採用しない。
