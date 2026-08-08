@@ -524,3 +524,26 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - アプリまたはPythonの強制終了後の復旧
 
 これらは第14その他の対応する開始Gateまで未決定とし、今回の限定実験から推測で確定しない。今回の結果を反映しても、停止契約全体または第0段階全体を完了扱いにしない。
+
+### 17.5 App Sandboxあり／なし subprocess比較検証結果
+
+`experiments/app-sandbox-subprocess/` の限定的な実験で、同一の最小実装によるSwift → Python → FFmpeg subprocessチェーンをApp Sandboxなし／ありの候補構成で比較した。実測の詳細は `experiments/app-sandbox-subprocess/RESULTS.md` を参照する。
+
+#### 確認済みの事実
+
+- App Sandboxなしでは、Foundation `Process` によるSwiftからPythonの起動と、Python標準ライブラリからのFFmpeg起動が3回すべて成功した。
+- 3回すべてでPythonおよびFFmpegの終了コード0、Python stdoutのJSON decode、stdout／stderr分離を確認した。
+- App Sandboxありの候補として、同一バイナリを `com.apple.security.app-sandbox = true` 付きでad-hoc署名したbundleは、Swiftの最初の実験用段階マーカーより前に終了コード134でabortした。
+- Sandboxあり版はPythonおよびFFmpegの起動処理へ到達していないため、PythonまたはFFmpegの問題とは判定しない。
+- bundle構造、Info.plist、entitlementsおよび署名の静的検証は成功した一方、Gatekeeperの読み取り専用評価ではCode Signing subsystemのinternal errorが返った。
+- ローカル開発署名IDは利用できず、開発署名によるApp Sandboxあり版の再検証は未実施である。
+
+#### 検証結果の限界と未決定事項
+
+今回のSandboxあり版は、Team Identifierを持たないad-hoc署名と実験用bundleの直接起動による候補構成に限定される。プロジェクトルールによりmacOS統合ログおよびクラッシュログは確認していないため、起動前abortの内部原因は確定していない。
+
+SwiftPMの `--disable-sandbox` は、検証環境でSwiftPM自身のmanifest／build sandboxが使用できなかったことへのビルド時限定の回避であり、比較対象のApp Sandbox設定または本番方式として採用しない。
+
+App Sandboxの採否、有効な開発署名または配布署名での挙動、本番の署名・配布方式、Python／FFmpeg／ffprobe／AIモデルの最終配置・同梱方式、Security-Scoped Bookmarkの採否、Sandbox下の外部ストレージアクセスおよび子プロセス停止方式は未検証・未決定のまま維持する。
+
+Sandboxなしで3回成功したことをApp Sandboxなしの正式採用根拠にせず、Sandboxありのad-hoc署名構成がabortしたことをApp Sandbox不採用の確定根拠にも使用しない。必要な本実装より前の開始Gateで、利用可能な正式署名条件と配布条件に基づいて再検証し、App Sandbox採否を正式決定する。今回の結果を反映しても第0段階全体を完了扱いにしない。
