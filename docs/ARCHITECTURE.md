@@ -488,3 +488,39 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - 本番の削除可能ルート
 
 通常接続時の限定I/O結果を正式反映しても、外部SDカードの切断・再接続を含む第0段階の技術検証全体は完了扱いにしない。保存契約は第19開始Gate、切断・復旧・reconciliationは第20開始Gate、App SandboxとSecurity-Scoped Bookmarkの最終採否は第22開始Gateを維持し、それぞれ必要な追加検証と正式決定を行う。
+
+### 17.4 `stop.requested` とFFmpeg停止 技術検証結果
+
+`experiments/stop-requested-ffmpeg/` の限定的な実験により、`stop.requested` を使うcooperative stop候補と、実行中FFmpegの停止後に状態を検証してから停止完了を分類する方式の技術的成立性を確認した。実測の詳細は `experiments/stop-requested-ffmpeg/RESULTS.md` を参照する。
+
+#### 確認済みの事実
+
+- FFmpeg開始前に `stop.requested` が存在する場合と、FFmpeg実行中に停止要求を検知した場合を区別できた。
+- 実行中FFmpegの停止では、`stop_requested_detected`、`ffmpeg_exit_observed`、`post_stop_state_verified`、`stop_complete_classified` の順序を機械的に確認できた。
+- 正常完了、ユーザー停止、FFmpeg異常終了を区別できた。
+- 停止または異常終了したケースでは、partialを正式成果物へ昇格させなかった。
+- 停止要求後およびFFmpeg異常終了後に、後続工程を開始しなかった。
+- 全ケースで対象FFmpegプロセスの終了を確認し、対象子プロセスを残さず終了できた。
+- FFmpegの終了だけを停止完了の根拠にせず、停止後状態の検証を経てから停止完了を分類する候補方式が成立した。
+
+正常完了ケースでは、FFmpegの終了コード0だけで正式化せず、partialの存在・非空とffprobeによるvideo stream、audio stream、正のdurationを確認した後にだけ、実験用正式成果物へrenameした。
+
+#### 検証条件と限界
+
+今回の実験では、Python標準ライブラリの `subprocess.Popen(..., shell=False)` と引数配列を使用し、実行中停止の候補操作として対象の `Popen` インスタンスだけへ `terminate()` を実行した。正常ジョブ2秒、停止対象ジョブ10秒、停止要求まで0.5秒、poll間隔0.05秒、ケースdeadline 15秒、実験上のterminate猶予3秒、人工入力、Matroska、mpeg4、aacその他の値と方式は検証専用である。これらを本番のsignal、時間値、codec、コンテナ、FFmpegコマンドまたは停止契約へ昇格させない。
+
+#### 未検証・未決定の事項
+
+- 本番で使用する停止signal
+- 停止猶予時間と強制終了条件
+- 強制終了の採否と方式
+- Process group方式と孫プロセス管理
+- SwiftからPythonへの停止通信schema、および停止完了event形式
+- `stop.requested` の本番での作成、所有、削除、stale判定
+- 本番FFmpegコマンド、codec、解析用WAV、完成MP4保存方式
+- 実際の長時間・高負荷処理、複数子プロセス、停止と自然終了・異常終了が競合する境界での挙動
+- partialの保持、検証、清掃、reconciliationの正式契約
+- App SandboxおよびSecurity-Scoped Bookmark下での停止動作
+- アプリまたはPythonの強制終了後の復旧
+
+これらは第14その他の対応する開始Gateまで未決定とし、今回の限定実験から推測で確定しない。今回の結果を反映しても、停止契約全体または第0段階全体を完了扱いにしない。
