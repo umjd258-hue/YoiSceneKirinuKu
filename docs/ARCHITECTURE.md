@@ -1,0 +1,349 @@
+# アーキテクチャ仕様
+
+## 1. 基本構成
+
+macOSネイティブのSwiftUIアプリをフロントエンドとし、解析・変換処理をPython側へ分離する。
+
+重要原則:
+
+- UIと解析ロジックを重複させない。
+- Viewの寿命とPythonプロセスの寿命を分離する。
+- 同じファイルをSwiftとPythonが無秩序に更新しない。
+- 正式成果物とpartialを明確に区別する。
+
+## 2. SwiftUIの担当
+
+SwiftUI側は主に以下を担当する。
+
+- 画面遷移
+- MP4選択
+- 人物選択
+- 解析開始要求
+- 停止要求
+- 進捗表示
+- 結果表示
+- AVPlayerによるプレビュー
+- 保存対象選択
+- `selection.json` 管理
+- ジョブ管理
+- ユーザー向けエラー表示
+
+## 3. Pythonの担当
+
+Python側は主に以下を担当する。
+
+- 動画Preflight
+- 解析用音声作成
+- VAD
+- Speaker Embedding
+- 人物判定
+- 品質判定
+- `result.json` 生成
+- 人物登録用音声生成
+- 人物Embedding生成
+- 完成動画保存
+- `save_state.json` 生成
+
+## 4. ファイル所有権
+
+以下を基本の所有権とする。各schemaと更新契約は、本体接続前に正式化する。
+
+| ファイル | 作成・更新 | 読取 | 削除 |
+|---|---|---|---|
+| `job.json` | Swift | Python | Swift |
+| `stop.requested` | Swift | Python | Swift |
+| `analysis.wav` | Python | Python | Swift |
+| `vad.json` | Python | Python | Swift |
+| `speaker_candidates.json` | Python | Python | Swift |
+| `result.json` | Python | Swift | Swift |
+| `selection.json` | Swift | Swift | Swift |
+| `save_state.json` | Python | Swift | Swift |
+| 完成MP4 | Python | ユーザー/アプリ | アプリでは削除しない |
+
+同じ正式ファイルをSwift/Python双方から更新する設計にしない。
+
+## 5. 永続データ共通契約
+
+永続JSONは次の原則に従う。
+
+- schema versionを必須とする。
+- 永続データ間の参照には安定した一意IDを使用する。
+- 表示名や配列位置を永続的な関連付けへ使用しない。
+- 動画内時刻と時間長の基準表現は整数ミリ秒を第一候補とする。
+- 未知schema、壊れたJSON、必須項目が不足したJSONを推測で正常処理しない。
+- 重要なJSONはpartialまたは一時ファイルへ書き、検証後に正式化する。
+
+ただし、重要資産ではない `selection.json` の破損については、`PRODUCT_SPEC.md` に従って標準の初期選択状態へ戻すことを明示的な例外とする。この復旧を解析結果や保存状態等の必須データへ拡張しない。
+
+schema versionの具体的な番号、ID形式、時刻キー名、丸め規則は未決定とする。第3開始前までに正式決定する。
+
+主要JSONの責務は次のとおり分離する。
+
+| JSON | 責務 | 主な所有者 |
+|---|---|---|
+| `job.json` | ジョブID、入力、選択人物、Source fingerprint、ジョブ要求情報 | Swift |
+| `result.json` | 正式に確定した解析候補 | Python |
+| `selection.json` | UI上の保存対象選択 | Swift |
+| `save_state.json` | 保存試行と正式保存済み成果物の状態 | Python |
+
+各JSONの全フィールド、必須条件、更新可能範囲、互換性方針は未決定とする。各JSONを初めて本体利用する段階の開始前までに正式schemaを定める。
+
+## 6. 人物データ構造
+
+1人物が1件以上のsampleを持つ構造とする。
+
+```text
+characters/
+└─ char_xxxxx/
+   ├─ character.json
+   └─ samples/
+      ├─ sample_xxxx/
+      │  ├─ source.wav
+      │  ├─ embedding
+      │  └─ sample.json
+      └─ sample_yyyy/
+         ├─ source.wav
+         ├─ embedding
+         └─ sample.json
+```
+
+人物名ではなく内部IDを使用する。
+
+`source.wav` は重要資産。
+Embeddingは `source.wav` から再生成可能な派生データとする。
+
+人物IDとsample IDには安定した一意IDを使用する。
+
+複数sampleから人物判定用Embeddingをどのように構成するかは未決定とする。平均、最大値、centroid、外れ値除去、重み付け等の方式を推測で採用しない。第8Aまたは第8B開始前までに技術検証結果をもとに正式決定する。
+
+## 7. 人物データのトランザクション
+
+### 新規人物
+
+完成前の人物を正式人物フォルダとして扱わない。
+
+例:
+
+```text
+char_xxxxx.partial
+```
+
+以下がすべて成功してから正式化する。
+
+1. 登録音声生成
+2. 最低限の品質確認
+3. Embedding生成
+4. 必要メタデータ確定
+
+既存人物へサンプル追加する場合も、新規サンプルだけを一時状態で生成する。失敗しても既存人物データへ影響させない。
+
+### 既存人物へのsample追加
+
+既存人物へsampleを追加する場合は、新sampleだけを一時領域で生成・検証する。`source.wav`、Embedding、メタデータがすべて正式化可能になってから人物データへ関連付ける。
+
+新規人物と既存人物へのsample追加について、正式化の原子性、失敗復旧、品質検証条件は未決定とする。第8A／第8B開始前までに正式決定する。
+
+### 人物削除
+
+人物削除は、固定した人物データルート内だけを対象とする。解析開始要求中、実行中、停止要求中、保存中など、人物データと競合する状態では実行しない。
+
+削除対象の検証、途中失敗時の扱い、symlinkや不正な相対パスへの対策は未決定とし、第8C開始前までに正式決定する。
+
+## 8. current_job
+
+初期版は基本的に1ジョブのみ。
+
+概念例:
+
+```text
+current_job/
+├─ job.json
+├─ analysis.wav
+├─ vad.json
+├─ speaker_candidates.json
+├─ result.json
+├─ selection.json
+├─ save_state.json
+├─ stop.requested
+└─ *.partial
+```
+
+正式完成済み工程のみ再開時に再利用する。
+
+`current_job` フォルダの存在だけを解析中の根拠にしない。少なくとも次の概念状態を区別する。
+
+- 解析開始要求
+- 起動準備中
+- 実行中
+- 停止要求中
+- 停止完了
+- 解析正式完了
+- 異常終了
+- 復旧確認中
+
+アプリ強制終了後は、永続状態と実際のプロセス状態を確認して復旧可否を判定する。staleな `stop.requested` を新しい解析の停止要求として誤用しない。
+
+再開時はSource fingerprintを使って元動画の同一性を確認する。fingerprintの具体方式は未決定とし、ファイルサイズ、更新時刻、部分ハッシュ、全体ハッシュ等から実装者が推測で選択しない。
+
+多重起動・二重解析防止方式、Source fingerprint方式、current_jobの正式な状態機械と復旧契約は、第9開始前までに技術検証結果をもとに正式決定する。
+
+## 9. Swift-Python通信
+
+初期版ではPython stdoutをJSON Lines通信専用とする。
+
+イベント種類は基本的に3つへ絞る。
+
+- `progress`
+- `error`
+- `finished`
+
+通常ログはstdoutへ出さず、stderrまたはログファイルへ出す。
+
+### progress例
+
+```json
+{
+  "type": "progress",
+  "stage": "speaker",
+  "status": "running",
+  "current": 42,
+  "total": 128
+}
+```
+
+工程完了は同じ `progress` で `status: "completed"` などを使用可能とする。
+
+通信は次の原則に従う。
+
+- stdoutは1行1JSONのJSON Lines通信専用とする。
+- 通常ログはstdoutへ出さない。
+- 壊れたJSONや未知eventを通常ログとして読み飛ばし、正常処理を継続しない。
+- `finished` はプロセス側の処理終了通知であり、成果物の成功証明ではない。
+
+停止完了を独立eventとして追加するか、既存の `progress` または `finished` に明確な終了理由を持たせるかは未決定とする。基本3種類との整合性を検証し、第14開始前までに正式決定する。独立eventを実装時に推測で追加しない。
+
+## 10. エラー通信
+
+Pythonの技術例外文字列をそのままユーザーUIへ出さない。
+
+Pythonは安定したエラーコードを返し、Swift側がユーザー向け日本語へ変換する。
+
+詳細ログは開発・診断用として別経路に保持する。
+
+エラーコード体系、ユーザー向け文言との対応、ログ保存場所・保存期間・動画パスや人物名等の取扱いは未決定とする。各機能の本体接続前までに必要な範囲を正式決定する。
+
+## 11. 完了判定
+
+`finished` を受信しただけでUIを完成状態にしない。
+
+解析完了例:
+
+1. Pythonから `finished` を受信。
+2. 正式 `result.json` の存在を確認。
+3. `result.json` を読み込めることを確認。
+4. 必要な終了条件を検証。
+5. すべて成功してからResultsへ遷移。
+
+保存も同様に、完成MP4と `save_state.json` の正式更新を確認してから「保存済み」とする。
+
+## 12. 解析パイプラインとpartial方式
+
+内部解析は次の責務境界とする。
+
+1. VAD
+2. 候補区間生成・結合・分割
+3. Speaker Embedding算出
+4. 人物判定
+5. 音声品質判定
+6. `result.json` 構築・検証・正式化
+
+人物判定と音声品質判定は独立した工程・結果とする。人物不明判定を音声品質判定で代用しない。
+
+長時間処理・重要ファイルは、処理途中のデータと正式完成データを分離する。
+
+原則:
+
+- 途中ファイルを正式ファイル名として公開しない。
+- 完成・検証後に正式化する。
+- partialしかない工程は再開時に未完成として扱う。
+- 保存先切断などで残ったpartialを完成MP4として扱わない。
+
+候補区間生成、結合、分割に必要な数値規則は未決定とし、第12開始前までに技術検証結果をもとに正式決定する。
+
+人物不明判定、人物一致度の段階表現、音声品質から◎・○・△への変換、品質reason codeは未決定とし、第15開始前までに正式決定する。AIの生スコアをUIへ渡さない。
+
+## 13. 停止
+
+cooperative stopを基本方針とし、`stop.requested` 方式を中心に技術検証する。
+
+1. Swiftが `stop.requested` を作成。
+2. UIを「安全に停止しています…」へ移行。
+3. Pythonは安全な境界で停止要求を確認。
+4. 新しい通常progressが届いても停止要求後のUI進捗へ反映しない。
+5. Pythonプロセス停止を確認。
+6. UIを「解析を停止しました」へ移行。
+
+FFmpegの長時間ブロック処理については、子プロセスの明示終了方式を技術検証する。
+
+停止成功時もpartialを正式化しない。停止要求、プロセス終了、停止後状態の検証、UI上の停止完了を別の事実として扱う。
+
+具体的なsignal、猶予時間、強制終了条件、プロセスグループ管理、停止完了event形式は未決定とする。第14開始前までに技術検証結果をもとに正式な停止契約を確定する。
+
+## 14. AVPlayer
+
+- Swift側で管理する。
+- 基本的に1インスタンス。
+- 候補変更時は前候補の再生を止める。
+- 選択候補の開始位置へseekする。
+- 自動再生しない。
+- observerを追加し続けない。適切に解除・再利用する。
+
+## 15. 状態管理
+
+排他的な状態を多数のBooleanで表現しない。
+
+例として、アプリの主要状態はenum等で表現する。
+
+Viewから `screen = .results` のように重要状態を直接変更せず、AppViewModel / Serviceの操作メソッド経由で遷移させる。
+
+UIのdisabledだけに二重実行防止を依存せず、Service層でも防止する。
+
+## 16. 保存トランザクションとreconciliation
+
+完成MP4へ直接書き込まない。保存の基本順序は次のとおりとする。
+
+1. partialへ書き込む。
+2. 書込み完了を確認する。
+3. MP4を検証する。
+4. 既存完成MP4との衝突がないことを正式な規則で確認する。
+5. 完成MP4として正式化する。
+6. `save_state.json` を原子的に更新する。
+7. 必要な成果物と状態を再検証する。
+
+MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態はreconciliation対象とする。保存先切断時のpartialを完成扱いしない。
+
+保存成果物の単位、ディレクトリ構造、ファイル名、既存ファイル衝突方式、`save_state.json` schemaは未決定とし、第19開始前までに正式決定する。
+
+`save_state.json` 破損、完成MP4だけ存在する状態、再保存、保存先切断、partial清掃を含むreconciliation契約は未決定とし、第20開始前までに正式決定する。
+
+## 17. 技術検証項目
+
+本体組み込み前に小さな実験コードで確認する。
+
+- App Sandboxあり／なし
+- Swift → Python subprocess
+- Python → FFmpeg
+- 外部SDカード読み書き
+- `stop.requested` 方式
+- FFmpeg停止
+- Source fingerprint
+- Macスリープ抑止
+- Python完成版同梱
+- FFmpeg同梱
+- 人物登録サンプルの適切な長さ
+
+初期版はApp Store配布を前提としないが、App Sandboxの採否は未決定とする。Python、FFmpeg、AIモデルの配置・同梱方式、Security-Scoped Bookmarkの採否、スリープ抑止方式も未決定とし、実装者が推測で確定しない。
+
+各検証には、検証目的、合格条件、影響する仕様、正式決定期限を設ける。検証成功だけで本体仕様を自動変更せず、結果を本書へ正式反映してから関連する本体実装を開始する。
+
+実験コードは `experiments/` に分離し、そのまま本体へコピーして完成扱いしない。

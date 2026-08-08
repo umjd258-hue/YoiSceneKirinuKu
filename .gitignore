@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+.AppleDouble
+
+# Xcode / Swift
+DerivedData/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ローカル設定・秘密情報
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+logs/
