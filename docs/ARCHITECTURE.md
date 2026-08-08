@@ -347,3 +347,30 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 各検証には、検証目的、合格条件、影響する仕様、正式決定期限を設ける。検証成功だけで本体仕様を自動変更せず、結果を本書へ正式反映してから関連する本体実装を開始する。
 
 実験コードは `experiments/` に分離し、そのまま本体へコピーして完成扱いしない。
+
+### 17.1 Swift → Python subprocess 技術検証結果
+
+`experiments/swift-python-subprocess/` の限定的な実験により、次の技術的成立性を確認した。
+
+#### 確認済みの事実
+
+- macOS上でFoundationの `Process` を使用し、SwiftからPython subprocessを起動できる。
+- shellを介さず、実行ファイルURLと引数配列を指定して起動できる。
+- 日本語および空白を含む引数を、欠落、分割、文字化けなく渡せる。
+- 少量出力の検証では、stdoutとstderrを分離して取得できる。
+- プロセスの終了理由と終了コードを取得できる。
+- 実行ファイルを起動できない失敗と、起動後の非0終了を区別できる。
+- Python実行ファイルのパスを、Swift側の実験プログラムへの外部入力として渡せる。
+- 外部依存の追加および外部アクセスなしで、上記の成立性を確認できた。
+
+この確認はFoundationの `Process`、Pythonの配置、同梱方式その他の本番方式の最終採用を意味しない。実測の詳細は `experiments/swift-python-subprocess/RESULTS.md` を参照する。
+
+#### 未検証・未決定の事項
+
+- 大量または長時間のstdoutとstderrを、デッドロックを避けながら同時かつ逐次的に読み取る方式は未検証とする。Swift–Python通信を本接続する段階の開始Gateまでに検証し、正式決定する。
+- Pythonの最終配置・同梱方式は未決定とし、Python subprocessを本体へ組み込む段階の開始Gateまでに正式決定する。
+- App Sandboxの採否は未決定とし、Python subprocess、外部SDカードI/Oその他の影響を受ける本実装より前のGateまでに正式決定する。
+- 本番のJSON Lines schemaは未決定とし、Swift–Python通信を本接続する段階の開始Gateまでに正式決定する。
+- 停止signal、猶予時間、強制終了方式は未決定とし、第14開始Gateまでに正式決定する。
+- FFmpeg子プロセスの起動、監視、停止および異常終了時の管理方式は未検証とし、Python → FFmpegを初めて本実装する段階の開始Gateまでに技術検証し、正式決定する。
+- SwiftおよびClangのmodule cacheを本番でどこへ配置し、どのように扱うかは未決定とする。検証時の `/private/tmp/yoi-scene-swift-python-module-cache` 指定は、検証環境の書込み制約を回避するためだけの措置であり、本番アーキテクチャとして採用しない。
