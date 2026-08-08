@@ -3,6 +3,14 @@ import XCTest
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
+    private let analysisReadyHome = HomeMockState(
+        video: .ready(fileName: "episode01.mp4", duration: "24分12秒"),
+        characters: .selected(names: ["コナン"]),
+        isAIModelAvailable: true,
+        isWorkspaceAvailable: true,
+        isAnalysisSlotAvailable: true
+    )
+
     func testInitialRouteIsHome() {
         let subject = AppViewModel()
 
@@ -10,7 +18,7 @@ final class AppViewModelTests: XCTestCase {
     }
 
     func testHomeCanNavigateToAnalysis() {
-        let subject = AppViewModel()
+        let subject = AppViewModel(homeMockState: analysisReadyHome)
 
         XCTAssertTrue(subject.navigateToAnalysis())
         XCTAssertEqual(subject.route, .analysis)
@@ -24,7 +32,7 @@ final class AppViewModelTests: XCTestCase {
     }
 
     func testAnalysisCanNavigateToResults() {
-        let subject = AppViewModel()
+        let subject = AppViewModel(homeMockState: analysisReadyHome)
         XCTAssertTrue(subject.navigateToAnalysis())
 
         XCTAssertTrue(subject.navigateToResults())
@@ -32,12 +40,12 @@ final class AppViewModelTests: XCTestCase {
     }
 
     func testEveryNonHomeRouteCanReturnHome() {
-        let analysis = AppViewModel()
+        let analysis = AppViewModel(homeMockState: analysisReadyHome)
         XCTAssertTrue(analysis.navigateToAnalysis())
         XCTAssertTrue(analysis.returnHome())
         XCTAssertEqual(analysis.route, .home)
 
-        let results = AppViewModel()
+        let results = AppViewModel(homeMockState: analysisReadyHome)
         XCTAssertTrue(results.navigateToAnalysis())
         XCTAssertTrue(results.navigateToResults())
         XCTAssertTrue(results.returnHome())
@@ -65,5 +73,83 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertFalse(subject.returnHome())
         XCTAssertEqual(subject.route, .home)
+    }
+
+    func testAnalysisStartRequiresEveryMockPrerequisite() {
+        var states = [HomeMockState]()
+        states.append(HomeMockState(
+            video: .unselected,
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: .checking,
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: .failed(message: "音声トラックが見つかりません"),
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: .unregistered,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: .unselected,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: .selected(names: []),
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: false,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: false,
+            isAnalysisSlotAvailable: true
+        ))
+        states.append(HomeMockState(
+            video: analysisReadyHome.video,
+            characters: analysisReadyHome.characters,
+            isAIModelAvailable: true,
+            isWorkspaceAvailable: true,
+            isAnalysisSlotAvailable: false
+        ))
+
+        for state in states {
+            XCTAssertFalse(state.canStartAnalysis)
+            let subject = AppViewModel(homeMockState: state)
+            XCTAssertFalse(subject.navigateToAnalysis())
+            XCTAssertEqual(subject.route, .home)
+        }
+    }
+
+    func testAnalysisStartIsEnabledWhenEveryMockPrerequisiteIsReady() {
+        XCTAssertTrue(analysisReadyHome.canStartAnalysis)
     }
 }

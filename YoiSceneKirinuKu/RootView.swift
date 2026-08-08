@@ -7,6 +7,7 @@ struct RootView: View {
         switch appViewModel.route {
         case .home:
             HomeView(
+                state: appViewModel.homeMockState,
                 onOpenAnalysis: appViewModel.navigateToAnalysis,
                 onOpenCharacters: appViewModel.navigateToCharacters
             )
