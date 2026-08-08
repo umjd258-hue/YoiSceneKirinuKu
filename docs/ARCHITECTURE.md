@@ -326,6 +326,8 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 
 `save_state.json` 破損、完成MP4だけ存在する状態、再保存、保存先切断、partial清掃を含むreconciliation契約は未決定とし、第20開始前までに正式決定する。
 
+第17.3の外部SDカードI/O検証で確認したrenameは、通常接続状態での小容量な単一実験ファイルに対する限定結果である。完成MP4の正式化方式、SHA-256、`fsync`、rename、`Path.unlink()` の本番採用、またはreconciliationの成立を意味しない。sidecarファイルを含む清掃契約は第19／第20の開始Gateまで未決定とし、手動承認を伴った今回の後片付けを本番の自動復旧方式へ転用しない。
+
 ## 17. 技術検証項目
 
 本体組み込み前に小さな実験コードで確認する。
@@ -333,7 +335,7 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - App Sandboxあり／なし
 - Swift → Python subprocess
 - Python → FFmpeg
-- 外部SDカード読み書き
+- 外部SDカードの通常接続時I/O、切断、再接続
 - `stop.requested` 方式
 - FFmpeg停止
 - Source fingerprint
@@ -431,3 +433,58 @@ MP4正式化後かつ `save_state.json` 更新前にクラッシュした状態�
 - SDカード切断中のFFmpeg挙動は未検証とする。
 
 これらは対応する本実装より前の開始Gateで、必要な追加検証結果をもとに正式決定する。今回の短時間実験から実装者が推測で確定しない。
+
+### 17.3 外部SDカード通常接続I/O 技術検証結果
+
+`experiments/external-storage-io/` の限定的な実機実験により、通常接続状態の外部SDカードに対する次の技術的成立性を確認した。実測の詳細は `experiments/external-storage-io/RESULTS.md` を参照する。
+
+#### 検証環境の記録
+
+- Device Identifier: `disk6s1`
+- Device Node: `/dev/disk6s1`
+- Volume UUID: `F042C88B-D87C-3882-8F4D-74CAD46B4F46`
+- Volume Name: `Untitled`
+- Mount Point: `/Volumes/Untitled`
+- Filesystem: ExFAT
+- Bus: USB
+- Python: 3.13.14
+
+これらは今回のローカル検証環境を識別するための記録であり、Device Identifier、Device Node、Volume UUID、Volume Name、Mount Point、ExFAT、USB接続または個別のSDカードを本番仕様として固定しない。今回の結果をExFAT全般または他のSDカードへ一般化しない。
+
+#### 確認済みの事実
+
+- 外部、removable、writable、mountedであることと、承認されたデバイス識別情報を操作前に確認できた。
+- ユーザーが承認した新規の専用実験ルートだけへ操作を限定できた。
+- partialファイルの排他的な新規作成、書込み、flush、`fsync`、読戻しが成立した。
+- 書込み後に期待bytesとの完全一致とSHA-256一致を確認できた。
+- partialから正式名へのrenameと、rename後のbytes完全一致およびSHA-256一致を確認できた。
+- 日本語と空白を含むファイル名を扱えた。
+- mountpoint、実験ルート、対象ファイルのsymlinkを拒否し、固定ルート、固定ファイル名、path traversal拒否によって操作範囲を制限できた。
+- 削除前に想定外項目を検知した際、安全ガードが自動削除を停止した。
+- 個別承認と複数回の再確認を経て、実験専用ファイルと空になった専用実験ルートの後片付けを完了できた。
+- 後片付け後、専用実験ルートが存在せず、SDカードのmountpointと識別情報が維持されていることを確認した。
+
+#### 想定外項目と安全停止
+
+削除前の専用実験ルート直下に、正式テストファイルに加えて `._日本語 空白 読み書きテスト.txt` が存在した。読み取り専用調査では、同ファイルは通常ファイル、非symlink、4,096 bytesだった。当初の自動削除許可集合に含まれていなかったため、安全ガードが自動削除を停止した。
+
+正式テストファイルを個別に削除した後、`._` ファイルを個別削除しようとした時点では存在せず、その後の読み取り専用確認でも存在しなかった。`._` ファイルの作成主体、生成条件、内容、正式ファイル削除との因果関係および存在しなくなった理由は断定しない。
+
+安全ガードによる停止は、想定外項目を推測で削除しなかったという限定的な確認事実である。一方、当初設計どおりの自動後片付けは未成立だった。個別承認と再確認を伴う手動の後片付け完了を、本番の自動reconciliation成立の根拠にしない。
+
+#### 検証結果の限界
+
+今回成立したpartial書込み、flush、`fsync`、bytes／SHA-256検証、rename、rename後検証および `Path.unlink()` は、小容量な単一実験ファイルと通常接続状態に限定した候補方式である。SHA-256、`fsync`、rename、`Path.unlink()` を本番方式として確定せず、完成MP4保存方式、正式化の原子性、保存トランザクションまたはreconciliationが成立したとは扱わない。
+
+#### 未検証・未決定の事項
+
+- `._` ファイルの生成条件、ライフサイクル、本番での扱い、およびsidecarファイルの安全な清掃契約
+- 他のExFAT媒体での再現性、およびAPFS、FAT32、NTFS等での挙動
+- 長時間・大容量ファイル、複数ファイル、容量不足、読取り専用化
+- 書込み途中、rename途中、rename直後の切断
+- 再接続、partial復旧、reconciliation
+- App SandboxおよびSecurity-Scoped Bookmarkの採否
+- 本番保存先構造、本番ファイル名、衝突方式、完成MP4保存方式
+- 本番の削除可能ルート
+
+通常接続時の限定I/O結果を正式反映しても、外部SDカードの切断・再接続を含む第0段階の技術検証全体は完了扱いにしない。保存契約は第19開始Gate、切断・復旧・reconciliationは第20開始Gate、App SandboxとSecurity-Scoped Bookmarkの最終採否は第22開始Gateを維持し、それぞれ必要な追加検証と正式決定を行う。
