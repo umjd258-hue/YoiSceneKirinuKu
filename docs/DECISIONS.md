@@ -1066,3 +1066,38 @@
 ### Gate判定
 
 方式、入力、判定条件、正常0件、進捗、error code、後続責務を正本化したため、第11開始Gateを通過済みとする。第11本体は未実装であり、完了扱いにしない。
+
+---
+
+## 2026-08-09：第11段階実装・検証
+
+### 対象Stage
+
+第11段階「VAD」
+
+### 実装内容
+
+- Pythonが正式`job.json`と第10契約の`analysis.wav`／`analysis_audio.json` pairをlock下で再検証してから、30ms frame RMS方式でactivityを検出する。
+- 連続するactive frameを整数ミリ秒の半開区間へ変換し、90ms未満を除外する。発話0件は正常な空配列として返す。
+- 検出区間はJSON Linesの実行結果としてメモリ内で受け渡し、永続`vad.json`、再利用成果物、候補IDを作成しない。
+- Pythonは`running`、`completed`、`finished`の順序と安定error codeを出力し、Swift Serviceは正常exit、完全なevent順序、厳密payload、非重複区間、最小長を検証してから成功を受理する。
+- Debugだけに既存ローカルPythonを設定し、Release配置は空のままとした。
+
+### 検証結果
+
+- Python構文検査と単体テスト全35件が成功した。そのうち第11段階7件で2区間検出、発話0件、短音除外、正式pair欠落・未知schema・dangling symlink拒否、partial非消費、処理失敗error、実CLI event順序を確認した。
+- DebugビルドとSwift単体テスト全61件が成功した。そのうち第11段階3件で正常区間と0件、重複・短すぎる区間、完了進捗欠落、既知error一致、異常exitの拒否を確認した。
+- `Info.plist`とXcode project設定の構文検査、`git diff --check`が成功した。
+- 既存の復旧テストは成功したが、Apple同梱Python起動を含む当該テストに約193秒を要した。第11実装の機能失敗、timeout、子プロセス残存ではない。
+- `vad.json`、候補結合・分割、人物判定、品質判定、停止、保存を先行実装していないことを確認した。
+
+### 未決定・未検証事項
+
+- 実人物、BGM、SE、残響、複数話者、端末差での検出精度は未検証のままとする。
+- 永続VAD schema、正式化・再利用、候補生成規則、候補IDは第12開始Gateまで未決定とする。
+- App Sandboxと配布時Python配置は第22開始Gate、停止方式は第14開始Gateまで未決定とする。
+- 今回のactivity条件を人物一致、音声品質、候補長の閾値へ転用しない。
+
+### Stage判定
+
+正式入力だけを処理し、発話あり・0件・失敗を単体検証でき、テスト専用／メモリ内区間を正式後段成果物にしていないため、第11段階を完了とする。
