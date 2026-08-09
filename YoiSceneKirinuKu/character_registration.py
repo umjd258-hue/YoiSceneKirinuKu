@@ -233,6 +233,26 @@ def character_update_lock(partial_root: Path, character_id: str):
         os.close(descriptor)
 
 
+@contextmanager
+def global_character_lock(partial_root: Path, exclusive: bool):
+    lock_path = partial_root / "global.lock"
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        raise RegistrationFailure("registration_character_busy") from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise RegistrationFailure("registration_character_busy")
+        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        try:
+            fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RegistrationFailure("registration_character_busy") from error
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def copy_character_directory(source: Path, destination: Path) -> None:
     validate_character_directory(source)
     character = read_json(source / "character.json")
@@ -423,6 +443,25 @@ def register_character(
         raise RegistrationFailure("registration_invalid_interval")
     source = Path(request["source_path"]) if isinstance(request["source_path"], str) else Path()
     root = prepare_root(request["characters_root"])
+    with global_character_lock(root / ".partial", exclusive=False):
+        return _register_character_locked(
+            name.strip(), source, start_ms, end_ms, root, ffmpeg_path, model_directory,
+            emitter, embedding_generator, fail_before_finalization,
+        )
+
+
+def _register_character_locked(
+    name: str,
+    source: Path,
+    start_ms: int,
+    end_ms: int,
+    root: Path,
+    ffmpeg_path: Path,
+    model_directory: Path,
+    emitter: Emitter,
+    embedding_generator: Callable[[Path, Path, Path], None],
+    fail_before_finalization: bool,
+) -> dict[str, Any]:
     character_id = "char_" + str(uuid.uuid4())
     sample_id = "sample_" + str(uuid.uuid4())
     staging = root / ".partial" / character_id
@@ -436,7 +475,7 @@ def register_character(
     write_json(staging / "character.json", {
         "schema_version": SCHEMA_VERSION,
         "character_id": character_id,
-        "display_name": name.strip(),
+        "display_name": name,
         "sample_ids": [sample_id],
     })
     summary = validate_character_directory(staging)
@@ -476,7 +515,7 @@ def add_sample(
     if not formal.exists():
         raise RegistrationFailure("registration_character_not_found")
 
-    with character_update_lock(partial_root, character_id):
+    with global_character_lock(partial_root, exclusive=False), character_update_lock(partial_root, character_id):
         validate_character_directory(formal)
         update_root = partial_root / ("update_" + str(uuid.uuid4()))
         staging = update_root / character_id
@@ -514,6 +553,56 @@ def add_sample(
         emitter.emit("progress", {"stage": "finalization", "status": "completed"})
         cleanup_swapped_character(update_root, staging)
         return actual
+
+
+def delete_character(
+    request: dict[str, Any],
+    emitter: Emitter,
+    fail_before_rename: bool = False,
+    keep_tombstone: bool = False,
+) -> str:
+    require_exact_keys(
+        request,
+        {"protocol_version", "request_id", "operation", "character_id", "characters_root"},
+        "registration_invalid_request",
+    )
+    character_id = request["character_id"]
+    if not isinstance(character_id, str) or CHARACTER_ID_PATTERN.fullmatch(character_id) is None:
+        raise RegistrationFailure("registration_invalid_request")
+    root = prepare_root(request["characters_root"])
+    partial_root = root / ".partial"
+    formal = root / character_id
+    with global_character_lock(partial_root, exclusive=True):
+        if not formal.exists():
+            raise RegistrationFailure("registration_character_not_found")
+        try:
+            validate_character_directory(formal)
+        except RegistrationFailure as error:
+            raise RegistrationFailure("registration_character_delete_failed") from error
+        tombstone_root = partial_root / ("delete_" + str(uuid.uuid4()))
+        tombstone = tombstone_root / character_id
+        if tombstone_root.exists():
+            raise RegistrationFailure("registration_character_delete_failed")
+        try:
+            tombstone_root.mkdir()
+        except OSError as error:
+            raise RegistrationFailure("registration_character_delete_failed") from error
+        if fail_before_rename:
+            raise RegistrationFailure("registration_character_delete_failed")
+        try:
+            os.rename(formal, tombstone)
+        except OSError as error:
+            raise RegistrationFailure("registration_character_delete_failed") from error
+        if formal.exists():
+            raise RegistrationFailure("registration_character_delete_failed")
+        try:
+            validate_character_directory(tombstone)
+        except RegistrationFailure as error:
+            raise RegistrationFailure("registration_character_delete_failed") from error
+        emitter.emit("progress", {"stage": "finalization", "status": "completed"})
+        if not keep_tombstone:
+            cleanup_swapped_character(tombstone_root, tombstone)
+        return character_id
 
 
 def list_characters(request: dict[str, Any]) -> list[dict[str, Any]]:
@@ -554,6 +643,8 @@ def main() -> int:
             result = {"character": character}
         elif operation == "list_characters":
             result = {"characters": list_characters(request)}
+        elif operation == "delete_character":
+            result = {"deleted_character_id": delete_character(request, emitter)}
         else:
             raise RegistrationFailure("registration_invalid_request")
         emitter.emit("finished", {"outcome": "succeeded", "result": result})

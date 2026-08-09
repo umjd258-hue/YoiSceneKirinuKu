@@ -45,6 +45,7 @@ struct RootView: View {
                 managementState: appViewModel.characterManagementState,
                 registration: appViewModel.newCharacterRegistration,
                 sampleAddition: appViewModel.existingCharacterSampleAddition,
+                deletion: appViewModel.characterDeletion,
                 onSelectManagedCharacter: appViewModel.selectManagedCharacter,
                 onBeginRegistration: appViewModel.beginNewCharacterRegistration,
                 onUpdateName: appViewModel.updateNewCharacterName,
@@ -64,6 +65,9 @@ struct RootView: View {
                 onRequestSampleAddition: appViewModel.requestExistingCharacterSampleAddition,
                 onRetrySampleAddition: appViewModel.retryExistingCharacterSampleAddition,
                 onCancelSampleAddition: appViewModel.cancelExistingCharacterSampleAddition,
+                onBeginDeletion: appViewModel.beginCharacterDeletion,
+                onRequestDeletion: appViewModel.requestCharacterDeletion,
+                onCancelDeletion: appViewModel.cancelCharacterDeletion,
                 onReturnHome: appViewModel.returnHome
             )
         }

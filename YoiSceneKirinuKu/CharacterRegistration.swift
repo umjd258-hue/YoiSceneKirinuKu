@@ -20,6 +20,7 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
     case finalizationFailed = "registration_finalization_failed"
     case characterNotFound = "registration_character_not_found"
     case characterBusy = "registration_character_busy"
+    case characterDeleteFailed = "registration_character_delete_failed"
     case protocolError = "registration_protocol_error"
 
     var userMessage: String {
@@ -42,7 +43,7 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
             "選択範囲の声が小さすぎます。"
         case .modelUnavailable, .embeddingFailed, .embeddingInvalid:
             "人物の声を登録できませんでした。"
-        case .metadataWriteFailed, .finalizationFailed:
+        case .metadataWriteFailed, .finalizationFailed, .characterDeleteFailed:
             "人物データを安全に保存できませんでした。"
         case .characterNotFound:
             "追加先の人物が見つかりません。"
@@ -82,9 +83,15 @@ enum CharacterLoadOutcome: Equatable, Sendable {
     case failure(CharacterRegistrationErrorCode)
 }
 
+enum CharacterDeletionOutcome: Equatable, Sendable {
+    case success(UUID)
+    case failure(CharacterRegistrationErrorCode)
+}
+
 protocol CharacterRegistrationServicing: Sendable {
     func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome
     func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome
+    func deleteCharacter(_ characterID: UUID, requestID: UUID) async -> CharacterDeletionOutcome
     func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome
 }
 
@@ -167,6 +174,19 @@ final class CharacterRegistrationService: CharacterRegistrationServicing, @unche
         ]
         let result = await execute(body: body, requestID: requestID, configuration: configuration)
         return CharacterRegistrationProtocolParser.parseRegistration(result, requestID: requestID)
+    }
+
+    func deleteCharacter(_ characterID: UUID, requestID: UUID) async -> CharacterDeletionOutcome {
+        guard let configuration else { return .failure(.modelUnavailable) }
+        let body: [String: Any] = [
+            "protocol_version": 1,
+            "request_id": requestID.uuidString.lowercased(),
+            "operation": "delete_character",
+            "character_id": "char_\(characterID.uuidString.lowercased())",
+            "characters_root": configuration.charactersRootURL.path,
+        ]
+        let result = await execute(body: body, requestID: requestID, configuration: configuration)
+        return CharacterRegistrationProtocolParser.parseDeletion(result, requestID: requestID)
     }
 
     private func execute(
@@ -306,6 +326,15 @@ private enum CharacterRegistrationProtocolParser {
             characters.append(character)
         }
         return .success(characters)
+    }
+
+    static func parseDeletion(_ process: CharacterProcessResult, requestID: UUID) -> CharacterDeletionOutcome {
+        guard let terminal = parse(process, requestID: requestID) else { return .failure(.protocolError) }
+        if let error = terminal.error { return .failure(error) }
+        guard let rawID = terminal.result?["deleted_character_id"] as? String,
+              let characterID = parseID(rawID, prefix: "char_"),
+              terminal.result?.count == 1 else { return .failure(.protocolError) }
+        return .success(characterID)
     }
 
     private static func parse(_ process: CharacterProcessResult, requestID: UUID) -> ParsedTerminal? {

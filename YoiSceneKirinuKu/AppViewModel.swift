@@ -369,6 +369,21 @@ struct ExistingCharacterSampleAdditionState: Equatable {
     }
 }
 
+enum CharacterDeletionPhase: Equatable {
+    case confirmation
+    case deletionRequested
+    case deleted
+    case failed(message: String)
+}
+
+struct CharacterDeletionState: Equatable {
+    var isPresented = false
+    var targetCharacterID: UUID?
+    var targetCharacterName: String?
+    var sampleCount = 0
+    var phase: CharacterDeletionPhase = .confirmation
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
@@ -379,6 +394,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var newCharacterRegistration = NewCharacterRegistrationState()
     @Published private(set) var characterManagementState = CharacterManagementState.initial
     @Published private(set) var existingCharacterSampleAddition = ExistingCharacterSampleAdditionState()
+    @Published private(set) var characterDeletion = CharacterDeletionState()
     private let preflightService: any PreflightServicing
     private let characterRegistrationService: any CharacterRegistrationServicing
     private var preflightTask: Task<Void, Never>?
@@ -388,6 +404,8 @@ final class AppViewModel: ObservableObject {
     private var currentRegistrationRequestID: UUID?
     private var sampleAdditionTask: Task<Void, Never>?
     private var currentSampleAdditionRequestID: UUID?
+    private var characterDeletionTask: Task<Void, Never>?
+    private var currentCharacterDeletionRequestID: UUID?
 
     init(
         homeState: HomeState = .initial,
@@ -508,7 +526,9 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func beginNewCharacterRegistration() -> Bool {
-        guard route == .characters, !newCharacterRegistration.isPresented else { return false }
+        guard route == .characters,
+              !newCharacterRegistration.isPresented,
+              !characterDeletion.isPresented else { return false }
         newCharacterRegistration = NewCharacterRegistrationState(isPresented: true)
         return true
     }
@@ -622,8 +642,61 @@ final class AppViewModel: ObservableObject {
     func selectManagedCharacter(_ characterID: UUID) {
         guard route == .characters,
               !existingCharacterSampleAddition.isPresented,
+              !characterDeletion.isPresented,
               homeState.registeredCharacters.contains(where: { $0.id == characterID }) else { return }
         characterManagementState.selectedCharacterID = characterID
+    }
+
+    @discardableResult
+    func beginCharacterDeletion() -> Bool {
+        guard route == .characters,
+              !characterDeletion.isPresented,
+              !newCharacterRegistration.isPresented,
+              !existingCharacterSampleAddition.isPresented,
+              let characterID = characterManagementState.selectedCharacterID,
+              let character = homeState.registeredCharacters.first(where: { $0.id == characterID }) else {
+            return false
+        }
+        characterDeletion = CharacterDeletionState(
+            isPresented: true,
+            targetCharacterID: characterID,
+            targetCharacterName: character.name,
+            sampleCount: characterManagementState.samples(for: characterID).count
+        )
+        return true
+    }
+
+    @discardableResult
+    func requestCharacterDeletion() -> Bool {
+        guard characterDeletion.isPresented,
+              characterDeletion.phase != .deletionRequested,
+              let characterID = characterDeletion.targetCharacterID else { return false }
+        let requestID = UUID()
+        currentCharacterDeletionRequestID = requestID
+        characterDeletion.phase = .deletionRequested
+        characterDeletionTask = Task { [weak self, characterRegistrationService] in
+            let outcome = await characterRegistrationService.deleteCharacter(characterID, requestID: requestID)
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success:
+                let reload = await characterRegistrationService.loadCharacters(requestID: UUID())
+                guard !Task.isCancelled else { return }
+                self?.applyDeletion(outcome, reload: reload, requestID: requestID, targetCharacterID: characterID)
+            case .failure:
+                self?.applyDeletion(outcome, reload: nil, requestID: requestID, targetCharacterID: characterID)
+            }
+        }
+        return true
+    }
+
+    func cancelCharacterDeletion() {
+        guard characterDeletion.phase != .deletionRequested else { return }
+        currentCharacterDeletionRequestID = nil
+        characterDeletion = CharacterDeletionState()
+    }
+
+    func waitForCharacterDeletionForTesting() async {
+        await characterDeletionTask?.value
     }
 
     @discardableResult
@@ -631,6 +704,7 @@ final class AppViewModel: ObservableObject {
         guard route == .characters,
               !newCharacterRegistration.isPresented,
               !existingCharacterSampleAddition.isPresented,
+              !characterDeletion.isPresented,
               let characterID = characterManagementState.selectedCharacterID,
               let character = homeState.registeredCharacters.first(where: { $0.id == characterID }) else { return false }
         existingCharacterSampleAddition = ExistingCharacterSampleAdditionState(
@@ -809,6 +883,32 @@ final class AppViewModel: ObservableObject {
             existingCharacterSampleAddition.phase = .failed(message: code.userMessage)
         }
         currentSampleAdditionRequestID = nil
+    }
+
+    private func applyDeletion(
+        _ outcome: CharacterDeletionOutcome,
+        reload: CharacterLoadOutcome?,
+        requestID: UUID,
+        targetCharacterID: UUID
+    ) {
+        guard currentCharacterDeletionRequestID == requestID,
+              characterDeletion.phase == .deletionRequested,
+              characterDeletion.targetCharacterID == targetCharacterID else { return }
+        switch outcome {
+        case .success(let deletedID):
+            guard deletedID == targetCharacterID,
+                  case .success(let characters) = reload,
+                  !characters.contains(where: { $0.characterID == targetCharacterID }) else {
+                characterDeletion.phase = .failed(message: CharacterRegistrationErrorCode.protocolError.userMessage)
+                currentCharacterDeletionRequestID = nil
+                return
+            }
+            replaceRegisteredCharacters(with: characters)
+            characterDeletion.phase = .deleted
+        case .failure(let code):
+            characterDeletion.phase = .failed(message: code.userMessage)
+        }
+        currentCharacterDeletionRequestID = nil
     }
 
     private func replaceRegisteredCharacters(with characters: [RegisteredCharacter]) {

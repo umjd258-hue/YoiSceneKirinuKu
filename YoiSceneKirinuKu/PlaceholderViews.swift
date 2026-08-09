@@ -420,6 +420,7 @@ struct CharactersView: View {
     let managementState: CharacterManagementState
     let registration: NewCharacterRegistrationState
     let sampleAddition: ExistingCharacterSampleAdditionState
+    let deletion: CharacterDeletionState
     let onSelectManagedCharacter: (UUID) -> Void
     let onBeginRegistration: () -> Bool
     let onUpdateName: (String) -> Void
@@ -439,6 +440,9 @@ struct CharactersView: View {
     let onRequestSampleAddition: () -> Bool
     let onRetrySampleAddition: () -> Bool
     let onCancelSampleAddition: () -> Void
+    let onBeginDeletion: () -> Bool
+    let onRequestDeletion: () -> Bool
+    let onCancelDeletion: () -> Void
     let onReturnHome: () -> Bool
 
     var body: some View {
@@ -518,6 +522,18 @@ struct CharactersView: View {
                 onCancel: onCancelSampleAddition
             )
         }
+        .sheet(
+            isPresented: Binding(
+                get: { deletion.isPresented },
+                set: { if !$0 { onCancelDeletion() } }
+            )
+        ) {
+            CharacterDeletionView(
+                state: deletion,
+                onRequestDeletion: onRequestDeletion,
+                onCancel: onCancelDeletion
+            )
+        }
     }
 
     @ViewBuilder
@@ -549,6 +565,7 @@ struct CharactersView: View {
                 }
 
                 Button("＋ 音声を追加") { onBeginSampleAddition() }
+                Button("人物を削除", role: .destructive) { onBeginDeletion() }
                 Text("合計 \(Self.formatDuration(samples.reduce(0) { $0 + $1.durationMilliseconds }))")
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -562,6 +579,39 @@ struct CharactersView: View {
     private static func formatDuration(_ milliseconds: Int64) -> String {
         let seconds = max(0, milliseconds) / 1_000
         return "\(seconds)秒"
+    }
+}
+
+private struct CharacterDeletionView: View {
+    let state: CharacterDeletionState
+    let onRequestDeletion: () -> Bool
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("人物を削除")
+                .font(.title2.bold())
+            Text("「\(state.targetCharacterName ?? "")」を削除しますか？ 登録音声\(state.sampleCount)件も削除されます。この操作は元に戻せません。")
+
+            if case .failed(let message) = state.phase {
+                Text(message).foregroundStyle(.red)
+            }
+            if state.phase == .deleted {
+                Text("人物を削除しました。")
+            }
+
+            HStack {
+                Button(state.phase == .deleted ? "閉じる" : "キャンセル") { onCancel() }
+                    .disabled(state.phase == .deletionRequested)
+                Spacer()
+                if state.phase != .deleted {
+                    Button("削除", role: .destructive) { onRequestDeletion() }
+                        .disabled(state.phase == .deletionRequested)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }
 

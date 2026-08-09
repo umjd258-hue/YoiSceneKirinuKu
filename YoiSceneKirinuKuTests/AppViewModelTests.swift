@@ -722,6 +722,59 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(subject.characterManagementState.samples(for: targetID), originalSamples)
     }
 
+    func testCharacterDeletionRequiresConfirmationAndFormalReload() async throws {
+        let targetID = UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!
+        let remainingID = UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!
+        let remaining = RegisteredCharacter(
+            characterID: remainingID,
+            displayName: "蘭",
+            samples: [RegisteredAudioSampleSummary(
+                id: UUID(uuidString: "984e2ee1-d0aa-4f31-a3dd-5c133c32b78d")!,
+                sourceFileName: "source.wav",
+                durationMilliseconds: 6_000
+            )]
+        )
+        let subject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.invalidRequest),
+            load: .success([remaining]),
+            deletion: .success(targetID)
+        ))
+        XCTAssertTrue(subject.navigateToCharacters())
+
+        XCTAssertTrue(subject.beginCharacterDeletion())
+        XCTAssertEqual(subject.characterDeletion.targetCharacterID, targetID)
+        XCTAssertEqual(subject.characterDeletion.targetCharacterName, "コナン")
+        XCTAssertEqual(subject.characterDeletion.sampleCount, 2)
+        XCTAssertTrue(subject.homeState.registeredCharacters.contains(where: { $0.id == targetID }))
+
+        XCTAssertTrue(subject.requestCharacterDeletion())
+        XCTAssertFalse(subject.requestCharacterDeletion())
+        XCTAssertEqual(subject.characterDeletion.phase, .deletionRequested)
+        await subject.waitForCharacterDeletionForTesting()
+
+        XCTAssertEqual(subject.characterDeletion.phase, .deleted)
+        XCTAssertEqual(subject.homeState.registeredCharacters, [CharacterSummary(id: remainingID, name: "蘭")])
+        XCTAssertFalse(subject.homeState.selectedCharacterIDs.contains(targetID))
+    }
+
+    func testCharacterDeletionFailureDoesNotChangeVisibleData() async {
+        let subject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.invalidRequest),
+            load: .success([]),
+            deletion: .failure(.characterBusy)
+        ))
+        XCTAssertTrue(subject.navigateToCharacters())
+        let before = subject.homeState.registeredCharacters
+        XCTAssertTrue(subject.beginCharacterDeletion())
+        XCTAssertTrue(subject.requestCharacterDeletion())
+        subject.cancelCharacterDeletion()
+        XCTAssertEqual(subject.characterDeletion.phase, .deletionRequested)
+        await subject.waitForCharacterDeletionForTesting()
+
+        XCTAssertEqual(subject.characterDeletion.phase, .failed(message: CharacterRegistrationErrorCode.characterBusy.userMessage))
+        XCTAssertEqual(subject.homeState.registeredCharacters, before)
+    }
+
     private func prepareValidExistingSampleAddition(_ subject: AppViewModel) {
         XCTAssertTrue(subject.beginExistingCharacterSampleAddition())
         subject.selectExistingCharacterSampleVideo(
@@ -929,6 +982,7 @@ private struct ImmediatePreflightService: PreflightServicing {
 private struct ImmediateCharacterRegistrationService: CharacterRegistrationServicing {
     let registration: CharacterRegistrationOutcome
     let load: CharacterLoadOutcome
+    var deletion: CharacterDeletionOutcome = .failure(.characterDeleteFailed)
 
     func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
         registration
@@ -936,6 +990,10 @@ private struct ImmediateCharacterRegistrationService: CharacterRegistrationServi
 
     func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
         registration
+    }
+
+    func deleteCharacter(_ characterID: UUID, requestID: UUID) async -> CharacterDeletionOutcome {
+        deletion
     }
 
     func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome {

@@ -85,6 +85,15 @@ class CharacterRegistrationTests(unittest.TestCase):
             "characters_root": str(self.characters),
         }
 
+    def deletion_request(self, character_id: str) -> dict:
+        return {
+            "protocol_version": 1,
+            "request_id": str(uuid.uuid4()),
+            "operation": "delete_character",
+            "character_id": character_id,
+            "characters_root": str(self.characters),
+        }
+
     def register_initial_character(self) -> dict:
         return MODULE.register_character(
             self.request(), FFMPEG, self.model, SilentEmitter(), embedding_generator=fake_embedding
@@ -145,7 +154,10 @@ class CharacterRegistrationTests(unittest.TestCase):
                 fail_before_finalization=True,
             )
         self.assertEqual(self._formal_directories(), [])
-        partial_items = list((self.characters / ".partial").iterdir())
+        partial_items = [
+            item for item in (self.characters / ".partial").iterdir()
+            if item.name != "global.lock"
+        ]
         self.assertEqual(len(partial_items), 1)
         self.assertEqual(MODULE.list_characters({
             "protocol_version": 1,
@@ -205,6 +217,69 @@ class CharacterRegistrationTests(unittest.TestCase):
                 )
         finally:
             os.close(descriptor)
+
+    def test_character_deletion_removes_only_selected_character(self) -> None:
+        selected = self.register_initial_character()
+        remaining = self.register_initial_character()
+        deleted_id = MODULE.delete_character(
+            self.deletion_request(selected["character_id"]), SilentEmitter()
+        )
+        self.assertEqual(deleted_id, selected["character_id"])
+        self.assertFalse((self.characters / selected["character_id"]).exists())
+        self.assertTrue((self.characters / remaining["character_id"]).is_dir())
+        self.assertEqual(
+            [item["character_id"] for item in MODULE.list_characters(self._list_request())],
+            [remaining["character_id"]],
+        )
+
+    def test_failure_before_delete_rename_preserves_formal_character(self) -> None:
+        selected = self.register_initial_character()
+        before = self.formal_snapshot(selected["character_id"])
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_character_delete_failed"):
+            MODULE.delete_character(
+                self.deletion_request(selected["character_id"]), SilentEmitter(), fail_before_rename=True
+            )
+        self.assertEqual(self.formal_snapshot(selected["character_id"]), before)
+
+    def test_delete_cleanup_failure_leaves_ignored_tombstone(self) -> None:
+        selected = self.register_initial_character()
+        MODULE.delete_character(
+            self.deletion_request(selected["character_id"]), SilentEmitter(), keep_tombstone=True
+        )
+        self.assertFalse((self.characters / selected["character_id"]).exists())
+        self.assertEqual(MODULE.list_characters(self._list_request()), [])
+        tombstones = list((self.characters / ".partial").glob("delete_*"))
+        self.assertEqual(len(tombstones), 1)
+
+    def test_delete_rejects_invalid_id_symlink_and_global_lock_contention(self) -> None:
+        selected = self.register_initial_character()
+        invalid = self.deletion_request("../character")
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_invalid_request"):
+            MODULE.delete_character(invalid, SilentEmitter())
+
+        lock_path = self.characters / ".partial" / "global.lock"
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_character_busy"):
+                MODULE.delete_character(self.deletion_request(selected["character_id"]), SilentEmitter())
+        finally:
+            os.close(descriptor)
+
+        formal = self.characters / selected["character_id"]
+        moved = self.characters / (selected["character_id"] + "_moved")
+        formal.rename(moved)
+        formal.symlink_to(moved, target_is_directory=True)
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_character_delete_failed"):
+            MODULE.delete_character(self.deletion_request(selected["character_id"]), SilentEmitter())
+
+    def _list_request(self) -> dict:
+        return {
+            "protocol_version": 1,
+            "request_id": str(uuid.uuid4()),
+            "operation": "list_characters",
+            "characters_root": str(self.characters),
+        }
 
     def _formal_directories(self) -> list[Path]:
         if not self.characters.exists():
