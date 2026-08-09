@@ -227,9 +227,15 @@ characters/.partial/char_xxxxx
 
 ### 人物削除
 
-人物削除は、固定した人物データルート内だけを対象とする。解析開始要求中、実行中、停止要求中、保存中など、人物データと競合する状態では実行しない。
+初期版の削除対象は人物全体だけとし、個別sample削除は実装しない。最後の1sampleを単独削除する操作も提供しない。人物全体を削除する場合は、その人物の `character.json`、`samples/`、全 `sample.json`、`source.wav`、`embedding.npy` だけを対象とする。完成MP4、元動画、`current_job`、他人物、人物データルート自身は削除対象にしない。
 
-削除対象の検証、途中失敗時の扱い、symlinkや不正な相対パスへの対策は未決定とし、第8C開始前までに正式決定する。
+削除可能ルートはApplication Support配下の固定 `local.YoiSceneKirinuKu/characters` に限定する。Swiftまたは外部入力から削除対象パスを受け取らず、canonicalな `char_<UUID>` だけを受け取って固定ルート直下の1階層として組み立てる。固定ルート、`.partial`、対象人物、全親と全子についてcanonical path、期待した種類、非symlink、既知項目だけであることを検証する。`..`、区切り文字、絶対パス、未知項目、IDとフォルダ名・JSONの不一致、ルート自身を拒否する。
+
+人物データ利用の共通排他は `.partial/global.lock` と `fcntl.flock` を使用する。人物登録・sample追加、および将来の解析等で人物データを読む処理はshared lockを保持し、人物削除はexclusive non-blocking lockを削除要求から正式削除確認まで保持する。sample追加はshared global lock取得後に既存の人物別exclusive lockを取得する。削除競合は `registration_character_busy` として拒否する。Swift側でも、解析開始要求中、解析中、停止要求中、保存中、新規登録中、sample追加中は削除要求を作らないが、UIのdisabledだけを排他根拠にしない。
+
+削除前に正式人物全体を再検証し、同一volumeの `.partial/delete_<UUID>/char_<UUID>` へ人物ディレクトリ全体を1回renameする。rename前の失敗・クラッシュでは正式人物を維持し、rename後は正式パスが存在しないことを再確認した時点で論理削除済みとする。rename後のtombstoneは人物一覧から無視し、既知構造・非symlinkを再検証した場合だけファイルを個別unlinkし、空ディレクトリを内側から非再帰rmdirする。glob、パスから推測した対象、一般的な再帰削除を使用しない。清掃失敗時はtombstoneを残して論理削除成功とし、他の項目を代替削除しない。
+
+Pythonが正式パス不在を確認し、Swiftが正式人物一覧を再読込みして対象人物不在を確認した場合だけUIを削除完了へ進める。削除要求、rename、Python確認、Swift再読込みのいずれかが未完了なら削除済み表示にしない。存在しない人物は `registration_character_not_found`、安全検証またはrename失敗は `registration_character_delete_failed` とする。partial tombstoneの一般reconciliation時期は後続復旧統合へ残すが、正式人物一覧の正しさには影響させない。
 
 ## 8. current_job
 
