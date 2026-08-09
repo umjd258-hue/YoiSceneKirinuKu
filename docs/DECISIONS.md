@@ -830,3 +830,40 @@
 ### 判定
 
 自動検証と静的監査の範囲で問題はなく、第8C段階は完了状態を維持する。未検証事項を検証済みへ変更せず、後続段階の契約を先行実装していない。
+
+---
+
+## 2026-08-09：第9開始Gateの正式決定
+
+### 対象Stage
+
+第9段階「current_job、排他、正式通信基盤」開始Gate
+
+### 決定事項
+
+- `job.json` はSwift所有のschema version 1とし、安定job/request ID、不変の元動画・fingerprint・選択人物、revision付き排他状態を持たせる。
+- 状態を開始要求、準備中、実行中、停止要求中、停止完了、正式完了、異常終了、復旧確認中へ分離し、フォルダやprocessの存在だけで状態を推測しない。
+- Source fingerprintはbyte数と全byte SHA-256を正式一致条件とし、更新時刻、部分hash、inodeを正式一致根拠に使用しない。
+- 排他はPython解析runnerが保持するローカルworkspaceの非待機 `fcntl.flock` を唯一の根拠とし、PID、stale時間、heartbeat、owner tokenは採用しない。
+- `stop.requested` はjob/request IDを持つSwift所有JSONとし、lock取得後にjob IDと状態でstaleを判定する。時刻では判定しない。
+- workspaceとcurrent_jobをApplication Support配下へ固定し、既知の1ファイルと検証済みpartialだけを個別に清掃する。再帰削除と未知項目削除を禁止する。
+- 第9以降のrunnerへ、既存の基本3event、共通フィールド、厳密payload、protocol violation、EOF、exit、正式成果物検証を含む成功条件を適用する。
+- 長時間解析・保存にはスリープ抑止が必要と判断するが、第9では実装しない。具体APIと全終了経路の解除契約は第22開始Gateで最終決定する。
+
+### 理由
+
+- 人工ファイル比較では軽量fingerprintが同一サイズ・mtime復元・部分範囲外変更を見逃し、全体SHA-256だけが全内容変更を検出した。
+- 排他比較では `flock` が競合時の取得者を1件に限定し、所有process異常終了後にlock fileを削除せずOSがlockを解放した。
+- 時刻、PID、heartbeatを実行根拠にしないことで、未検証の時間値とPID再利用を第9へ持ち込まずfail-closedにできる。
+- 既存Preflight通信契約と大量stdout／stderr検証を共通runnerへ拡張し、未知入力や`finished`だけを成功へ読み替えないため。
+
+### 後続へ残す事項
+
+- 停止signal、猶予時間、強制終了、Process group、停止完了payloadは第14開始Gateまで未決定とする。
+- VAD以降の成果物schema、正式完了条件、再利用条件は対応する開始Gateへ残す。
+- App Sandbox、完成版filesystem、スリープ抑止APIと解除契約の最終検証は第22開始Gateへ残す。
+- Security-Scoped Bookmarkと外部SDカード上の大容量全体hash性能は未検証のままとする。
+
+### Gate判定
+
+第9開始に必要な状態、所有権、job schema、fingerprint、排他、stale停止要求、削除境界、通信成功条件を正本化したため、第9開始Gateを通過済みとする。第9本体は未実装であり、完了扱いにしない。

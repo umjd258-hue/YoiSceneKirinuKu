@@ -120,7 +120,7 @@ Preflightは軽量な解析可能性確認であり、本解析の成功、全fr
 | `selection.json` | UI上の保存対象選択 | Swift |
 | `save_state.json` | 保存試行と正式保存済み成果物の状態 | Python |
 
-各JSONの全フィールド、必須条件、更新可能範囲、互換性方針は未決定とする。各JSONを初めて本体利用する段階の開始前までに正式schemaを定める。
+`job.json` の全フィールド、必須条件、更新可能範囲、正式化方式は第8.1節で決定済みとする。その他のJSONは未決定とし、各JSONを初めて本体利用する段階の開始前までに正式schemaを定める。
 
 ## 6. 人物データ構造
 
@@ -271,9 +271,66 @@ current_job/
 
 アプリ強制終了後は、永続状態と実際のプロセス状態を確認して復旧可否を判定する。staleな `stop.requested` を新しい解析の停止要求として誤用しない。
 
-再開時はSource fingerprintを使って元動画の同一性を確認する。fingerprintの具体方式は未決定とし、ファイルサイズ、更新時刻、部分ハッシュ、全体ハッシュ等から実装者が推測で選択しない。
+### 8.1 第9段階の正式状態機械
 
-多重起動・二重解析防止方式、Source fingerprint方式、current_jobの正式な状態機械と復旧契約は、第9開始前までに技術検証結果をもとに正式決定する。
+`job.json.state` は `start_requested`、`preparing`、`running`、`stop_requested`、`stopped`、`completed`、`failed`、`recovery_required` のいずれかとする。フォルダ、lock file、Pythonプロセスの存在だけから状態を推測しない。
+
+- 新規要求は `start_requested` から始まり、排他取得と入力検証後に `preparing`、Python runnerの開始確認後に `running` へ進む。
+- `running` からだけ `stop_requested` へ進める。`stopped` への遷移は第14段階の停止後検証を満たした場合だけ許可する。
+- `completed` は第15段階で正式 `result.json` を検証した場合だけ許可し、`finished` 受信だけでは遷移しない。
+- 準備・通信・process・永続化の失敗は `failed` とする。ただし、アプリ起動時に旧jobがactive状態のまま正式lock所有者を確認できない場合は、推測で失敗または実行中にせず `recovery_required` とする。
+- `recovery_required` からの再開は、排他取得、Source fingerprint一致、stale停止要求処理、各正式成果物のschema検証をすべて満たす場合だけ許可する。未実装の後続成果物を再利用しない。
+
+`job.json` はSwiftだけが作成・更新し、トップレベルを次の必須項目だけに限定する。
+
+```json
+{
+  "schema_version": 1,
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "start_request_id": "6ba7b810-9dad-4f75-a0a7-6f55b7de34aa",
+  "state_revision": 0,
+  "state": "start_requested",
+  "source": {
+    "path": "/absolute/path/video.mp4",
+    "fingerprint": {
+      "version": 1,
+      "algorithm": "sha256",
+      "byte_count": 123456,
+      "digest": "64文字の小文字16進数"
+    }
+  },
+  "selected_character_ids": ["char_550e8400-e29b-41d4-a716-446655440000"],
+  "failure_code": null
+}
+```
+
+`job_id` と `start_request_id`、`source`、`selected_character_ids` は作成後に変更しない。`selected_character_ids` は1件以上で重複を許さない。Swiftが更新できるのは `state_revision`、`state`、`failure_code` だけとし、更新ごとにrevisionを1増やす。`failure_code` は `failed` の場合だけ安定error code文字列、それ以外はnullとする。全項目と入れ子objectは余分な項目を拒否する。Swiftは固定 `.partial/job_<request_id>.json.partial` へ排他的に書き、flush、fsync、再読込み検証後に `job.json` へ同一volume renameし、正式ファイルも再読込み検証する。
+
+### 8.2 Source fingerprint
+
+正式な同一性判定は、通常ファイルの全byteを対象とするSHA-256とbyte数の組合せとする。更新時刻、部分hash、inodeは正式な一致根拠に使用しない。計算前後に同じ通常ファイル・非symlinkであること、byte数、更新時刻のナノ秒値、filesystem上のfile identityが変わっていないことを確認し、途中変更、読取失敗、切断はfingerprint計算失敗としてjobを開始しない。計算途中のdigestを保存または再利用しない。
+
+再開・復旧時は元動画を再度全体hashし、`version`、`algorithm`、`byte_count`、`digest` がすべて一致する場合だけ後続の正式成果物検証へ進む。不一致または再計算不能時は中間成果物を再利用せず、`source_changed` または `source_unavailable` として安全に失敗する。今回の方式は検出能力を優先した初期版契約であり、将来軽量化する場合はschema versionを変更して別Gateで再決定する。
+
+### 8.3 多重起動・二重解析防止
+
+固定workspace直下の `analysis.lock` に対する非待機 `fcntl.flock(LOCK_EX | LOCK_NB)` を唯一の実行排他根拠とする。lock fileの存在、`current_job` の存在、`job.json.state`、PID、時刻をlock所有の根拠にしない。初期版ではstale時間、PID照合、heartbeat、owner token、所有者メタデータを採用しない。
+
+lockはSwiftUI ViewではなくPython解析runnerが、解析要求を受理する前に取得し、全子プロセス終了と終了後状態検証が終わるまで同じfile descriptorで保持する。Swiftはrunnerから要求と一致する `progress(stage: "job_lock", status: "completed")` を受信するまで `job.json` を正式化せず、lock競合は `analysis_busy` として後続処理を開始しない。runnerの異常終了時はOSによるlock解放を利用し、lock fileを削除しない。新しいアプリがactive状態の旧jobを発見した場合、lock取得できても直ちに新解析を始めず `recovery_required` として復旧監査する。
+
+`flock` はadvisory lockであるため、解析runner、復旧、停止、current_jobを変更する全Serviceが同じ取得規約を守る。App Sandboxと完成版filesystemでの最終成立性は第22開始Gateまで未検証とする。
+
+### 8.4 `stop.requested` とworkspace境界
+
+`stop.requested` はSwift所有の永続JSONとし、`schema_version: 1`、対象 `job_id`、停止操作の `request_id` だけを必須とする。固定partialへ排他的に書き、flush、fsync、再読込み検証後に正式化する。Pythonは正式ファイルだけを読み、壊れたJSON、未知schema、job不一致を停止要求として推測しない。
+
+新規開始または復旧監査時、正式lockを取得したServiceだけが `stop.requested` を判定する。現在の `job.json.state == stop_requested` かつjob ID一致の場合だけ有効要求とする。それ以外の正しく検証できる停止要求はstaleとし、固定ファイル1件だけを個別unlinkして不在を確認する。symlink、未知項目、壊れたJSONは削除せず `job_workspace_invalid` でfail-closedとする。時刻や経過秒数でstaleを推測しない。停止完了表現と停止後清掃は第14開始Gateで確定する。
+
+workspaceはApplication Support配下の固定 `local.YoiSceneKirinuKu/workspace`、job領域はその直下の固定 `current_job` とする。第9段階で作成・更新・清掃できるのは `analysis.lock`、`current_job/job.json`、`current_job/stop.requested`、および名前とrequest IDを検証した対応partialだけとする。外部入力から削除パスを受け取らず、全親と対象の非symlink、canonicalな1階層、既知種類を検証する。glob、一般的な再帰削除、未知項目の削除、workspace root自身の削除を禁止する。後続段階が成果物を追加するたびに許可リストと清掃責務をその開始Gateで拡張する。
+
+### 8.5 スリープ抑止
+
+長時間の解析・保存中は意図しないidle sleepによる中断を避ける必要がある。ただし第9段階は実解析を行わないため、スリープ抑止を実装しない。具体API、開始・解除・異常終了時の最終契約、App Sandbox下の挙動は第22開始Gateで正式決定する。採用時はServiceが長時間処理開始直前に取得し、全子プロセス終了と状態検証後に正常・失敗・停止の全経路で解除するものとし、Viewの寿命には結び付けない。
 
 ## 9. Swift-Python通信
 
@@ -326,6 +383,10 @@ Preflight成功時の `finished.payload` は、`outcome: "succeeded"` と、少�
 - protocol violation発生後に受信したeventを成功根拠に使用しない。
 
 第3段階のPreflight成功には、起動成功、protocol violationなし、要求と一致するID、`error`なし、妥当な `finished(outcome: succeeded)` とresult、process exit code 0、stdout／stderr双方のEOF確認をすべて必要とする。終了コード0だけ、または `finished` だけでは成功にしない。exit code非0、signal終了、起動失敗、terminal event欠落は失敗とする。
+
+第9段階以降の共通runnerも同じ共通フィールド、sequence、EOF、exit、terminal規則を使用する。`progress.payload` はoperationごとに正本化した `stage` と `status` の完全一致、`error.payload` は安定 `code` だけ、`finished.payload` は成功時に `outcome: "succeeded"` とoperation固有の検証可能な `result`、失敗時に `outcome: "failed"` と直前errorと同じ `code` を必須とし、余分な項目を拒否する。Stage 9のrunnerは `job_lock` と `job_ready` のstage、`running` と `completed` のstatusだけを使用し、成功resultは一致する `job_id` と最終 `state` だけを返す。
+
+malformed JSON、未知event、未知stage/status、未知error code、型不一致、要求IDまたはjob ID不一致、sequence違反、error後の成功、terminal欠落・重複・後続eventをすべて `protocol_error` とする。protocol violation後はrunnerを成功根拠にせず、対象process終了、stdout／stderr双方のEOF、正式 `job.json` 再検証まで完了して失敗状態を確定する。大量・長時間stdout／stderrの読取りは第0段階で成立した独立逐次読取りを使用し、具体buffer、Queue、Concurrency方式は実装詳細として固定しない。
 
 停止完了を独立eventとして追加するか、既存の `progress` または `finished` に明確な終了理由を持たせるかは未決定とする。基本3種類との整合性を検証し、第14開始前までに正式決定する。独立eventを実装時に推測で追加しない。
 
