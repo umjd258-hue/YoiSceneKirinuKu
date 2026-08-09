@@ -60,6 +60,24 @@ final class AnalysisAudioTests: XCTestCase {
         )
     }
 
+    func testProtocolParserAcceptsStoppedOnlyAfterOrderedVerification() {
+        let requestID = UUID()
+        let jobID = UUID()
+        let output = """
+        {"protocol_version":1,"type":"progress","request_id":"\(requestID.uuidString.lowercased())","sequence":1,"payload":{"stage":"analysis_audio","status":"running"}}
+        {"protocol_version":1,"type":"progress","request_id":"\(requestID.uuidString.lowercased())","sequence":2,"payload":{"stage":"analysis_stop","status":"stop_requested_detected"}}
+        {"protocol_version":1,"type":"progress","request_id":"\(requestID.uuidString.lowercased())","sequence":3,"payload":{"stage":"analysis_stop","status":"child_exit_observed"}}
+        {"protocol_version":1,"type":"progress","request_id":"\(requestID.uuidString.lowercased())","sequence":4,"payload":{"stage":"analysis_stop","status":"post_stop_state_verified"}}
+        {"protocol_version":1,"type":"finished","request_id":"\(requestID.uuidString.lowercased())","sequence":5,"payload":{"outcome":"stopped","result":{"job_id":"\(jobID.uuidString.lowercased())","state":"stopped","reason":"user_requested"}}}
+
+        """
+        XCTAssertEqual(parse(output, requestID: requestID), .stopped(jobID: jobID))
+        XCTAssertEqual(
+            parse(output.replacingOccurrences(of: "child_exit_observed", with: "post_stop_state_verified"), requestID: requestID),
+            .failure(.protocolError)
+        )
+    }
+
     private func parse(_ text: String, requestID: UUID) -> AnalysisAudioOutcome {
         AnalysisAudioProtocolParser.parse(
             AnalysisAudioProcessResult(

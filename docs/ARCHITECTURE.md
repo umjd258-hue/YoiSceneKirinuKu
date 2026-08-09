@@ -395,6 +395,18 @@ partialは固定`.partial/speaker_matches_<request_id>.json.partial`だけを使
 
 人工合成音声の既存技術検証では、同じ固定モデルで3〜30秒の16kHz mono入力から再現可能な192次元有限L2正規化Embeddingを生成し、複数sample centroidとcosine similarityを算出できた。これは生成・比較方式の成立性だけを支持し、実人物の識別精度、人物一致閾値、人物不明判定、UI表示へ一般化しない。実測詳細は`experiments/speaker-embedding/RESULTS.md`を参照する。
 
+### 8.10 第14段階の停止・再開契約
+
+Swiftは`running`の正式jobに対してだけ停止を要求できる。`stop.requested`は第8.4節のschemaを使用し、固定partialへの排他的書込み、flush／fsync、再読込み検証、同一volume renameで正式化してから、同じrequest IDで`job.json`を次revisionの`stop_requested`へ更新する。marker作成またはjob更新を確認できない場合は停止要求成功にしない。`running`以外、重複要求、壊れたmarker、job不一致はfail-closedとする。
+
+長時間FFmpegは、その処理を所有するPythonが`subprocess.Popen(..., shell=False, start_new_session=True)`と引数配列で起動し、0.1秒のpoll境界で有効な停止要求を確認する。停止時は対象process groupだけへ`SIGTERM`を送り、5秒以内に終了しない場合だけ同じgroupへ`SIGKILL`を送り、さらに5秒以内の終了を必須とする。PID名検索、`pkill`、他jobへのsignalを禁止する。
+
+停止完了は独立eventを追加せず、基本3eventの`progress`とterminal `finished`を使用する。`analysis_stop`のprogressは`stop_requested_detected`、`child_exit_observed`、`post_stop_state_verified`の順とし、その後にだけ`finished.payload`を`outcome: "stopped"`、`result: {job_id, state: "stopped", reason: "user_requested"}`として送る。signal由来のreturn codeだけではユーザー停止と分類しない。停止要求なしの非0終了はerror＋`finished(outcome: "failed")`とする。
+
+停止後は、対象Python／子processの終了、有効markerとjob IDの一致、停止中工程のpartial非正式化、後続工程非開始、既存正式成果物の許可集合・通常ファイル・非symlink、Source fingerprint一致を検証する。これらを満たして`job.json`を次revisionの`stopped`へ正式化した後にmarkerを個別unlinkし、不在を確認して初めて停止完了とする。再開は正式`stopped`、marker不在、fingerprint一致、workspace許可集合、既存正式成果物の再検証を必須とし、partialは再利用しない。
+
+App Sandbox下のprocess group／signal、配布版Python・FFmpeg配置、アプリ自体の異常終了後に残る外部processの扱いは第22開始Gateまで未検証・未決定とする。
+
 ### 8.5 スリープ抑止
 
 長時間の解析・保存中は意図しないidle sleepによる中断を避ける必要がある。ただし第9段階は実解析を行わないため、スリープ抑止を実装しない。具体API、開始・解除・異常終了時の最終契約、App Sandbox下の挙動は第22開始Gateで正式決定する。採用時はServiceが長時間処理開始直前に取得し、全子プロセス終了と状態検証後に正常・失敗・停止の全経路で解除するものとし、Viewの寿命には結び付けない。
@@ -455,7 +467,7 @@ Preflight成功時の `finished.payload` は、`outcome: "succeeded"` と、少�
 
 malformed JSON、未知event、未知stage/status、未知error code、型不一致、要求IDまたはjob ID不一致、sequence違反、error後の成功、terminal欠落・重複・後続eventをすべて `protocol_error` とする。protocol violation後はrunnerを成功根拠にせず、対象process終了、stdout／stderr双方のEOF、正式 `job.json` 再検証まで完了して失敗状態を確定する。大量・長時間stdout／stderrの読取りは第0段階で成立した独立逐次読取りを使用し、具体buffer、Queue、Concurrency方式は実装詳細として固定しない。
 
-停止完了を独立eventとして追加するか、既存の `progress` または `finished` に明確な終了理由を持たせるかは未決定とする。基本3種類との整合性を検証し、第14開始前までに正式決定する。独立eventを実装時に推測で追加しない。
+停止完了は第8.10節のとおり独立eventを追加せず、順序付き`progress`と`finished(outcome: "stopped")`で表す。`finished`だけでは停止成功にせず、process終了、停止後状態、正式`stopped` jobをSwiftでも再検証する。
 
 ## 10. エラー通信
 
@@ -517,14 +529,14 @@ cooperative stopを基本方針とし、`stop.requested` 方式を中心に技�
 2. UIを「安全に停止しています…」へ移行。
 3. Pythonは安全な境界で停止要求を確認。
 4. 新しい通常progressが届いても停止要求後のUI進捗へ反映しない。
-5. Pythonプロセス停止を確認。
-6. UIを「解析を停止しました」へ移行。
+5. Pythonと対象process groupの終了、partial非正式化、後続工程非開始、正式job状態を確認。
+6. `finished(outcome: "stopped")`と正式`stopped` jobの一致確認後だけ、UIを「解析を停止しました」へ移行。
 
 FFmpegの長時間ブロック処理については、子プロセスの明示終了方式を技術検証する。
 
 停止成功時もpartialを正式化しない。停止要求、プロセス終了、停止後状態の検証、UI上の停止完了を別の事実として扱う。
 
-具体的なsignal、猶予時間、強制終了条件、プロセスグループ管理、停止完了event形式は未決定とする。第14開始前までに技術検証結果をもとに正式な停止契約を確定する。
+具体的な初期版停止契約は第8.10節を正本とする。App Sandboxと配布構成での成立性は第22開始Gateまで未決定とする。
 
 ## 14. AVPlayer
 

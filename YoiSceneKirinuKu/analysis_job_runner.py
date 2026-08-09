@@ -213,6 +213,29 @@ def write_job(workspace: Path, job: dict[str, Any], request_id: str) -> None:
     validate_job(read_json(current / "job.json", "job_invalid"))
 
 
+def replace_job(workspace: Path, job: dict[str, Any], request_id: str) -> dict[str, Any]:
+    """既存jobを検証済みの次revisionへ原子的に置換する。"""
+    current = workspace / "current_job"
+    path = current / "job.json"
+    temporary = workspace / ".partial" / f"job_{request_id}.json.partial"
+    data = json.dumps(validate_job(job), ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n"
+    try:
+        with temporary.open("x", encoding="utf-8") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        validate_job(read_json(temporary, "job_invalid"))
+        os.replace(temporary, path)
+        directory = os.open(current, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        raise JobFailure("job_write_failed") from error
+    return validate_job(read_json(path, "job_invalid"))
+
+
 def validate_stop(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise JobFailure("job_workspace_invalid")
@@ -280,6 +303,31 @@ def recover_job(workspace: Path) -> dict[str, Any]:
     return validate_job(read_json(path, "job_invalid"))
 
 
+def resume_job(workspace: Path, requested_job_id: str, request_id: str) -> dict[str, Any]:
+    current = workspace / "current_job"
+    if not current.is_dir() or current.is_symlink():
+        raise JobFailure("job_not_found")
+    job = validate_job(read_json(current / "job.json", "job_invalid"))
+    if job["job_id"] != requested_job_id or job["state"] != "stopped":
+        raise JobFailure("job_invalid")
+    marker = current / "stop.requested"
+    if marker.exists() or marker.is_symlink():
+        raise JobFailure("job_workspace_invalid")
+    if source_fingerprint(Path(job["source"]["path"])) != job["source"]["fingerprint"]:
+        raise JobFailure("source_changed")
+    allowed = {
+        "job.json", "analysis.wav", "analysis_audio.json", "vad.json",
+        "speaker_candidates.json", "speaker_matches.json",
+    }
+    for item in current.iterdir():
+        if item.name not in allowed or item.is_symlink() or not item.is_file():
+            raise JobFailure("job_workspace_invalid")
+    job["state_revision"] += 1
+    job["state"] = "preparing"
+    job["failure_code"] = None
+    return replace_job(workspace, job, request_id)
+
+
 def run(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
     exact(request, {"protocol_version", "request_id", "operation", "workspace_root", "job"})
     if request["protocol_version"] != 1:
@@ -307,6 +355,8 @@ def run(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
             result = recover_job(workspace)
             if result["job_id"] != job["job_id"]:
                 raise JobFailure("job_invalid")
+        elif operation == "resume_job":
+            result = resume_job(workspace, job["job_id"], request["request_id"])
         else:
             raise JobFailure("job_invalid")
         emitter.emit("progress", {"stage": "job_ready", "status": "completed"})

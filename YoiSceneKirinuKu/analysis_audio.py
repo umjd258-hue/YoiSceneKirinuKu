@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import analysis_job_runner as jobs
+import analysis_stopping as stopping
 
 
 PROFILE = {
@@ -44,6 +45,12 @@ class AudioFailure(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+class AudioStopped(Exception):
+    def __init__(self, job_id: str) -> None:
+        super().__init__(job_id)
+        self.job_id = job_id
 
 
 class Emitter:
@@ -245,8 +252,17 @@ def generate(
             job = jobs.validate_job(jobs.read_json(current / "job.json", "job_invalid"))
         except jobs.JobFailure as error:
             raise AudioFailure("analysis_audio_job_invalid") from error
-        if job["job_id"] != job_id or job["state"] not in {"start_requested", "preparing", "recovery_required"}:
+        if job["job_id"] != job_id or job["state"] not in {
+            "start_requested", "preparing", "running", "stop_requested", "recovery_required",
+        }:
             raise AudioFailure("analysis_audio_job_invalid")
+        pending_stop = stopping.requested(current, job_id)
+        if pending_stop is not None:
+            emitter.emit("progress", {"stage": "analysis_stop", "status": "stop_requested_detected"})
+            emitter.emit("progress", {"stage": "analysis_stop", "status": "child_exit_observed"})
+            stored = stopping.complete(workspace, current, pending_stop)
+            emitter.emit("progress", {"stage": "analysis_stop", "status": "post_stop_state_verified"})
+            raise AudioStopped(stored["job_id"])
         reconcile(workspace, current)
         reused = reuse(current, job)
         if reused is not None:
@@ -271,9 +287,17 @@ def generate(
             "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-f", "wav", str(wav_partial),
         ]
         try:
-            completed = subprocess.run(arguments, shell=False, capture_output=True, check=False)
-        except OSError as error:
+            stop_events: list[str] = []
+            completed, stopped_job = stopping.run_process(
+                arguments, workspace, current, job_id, stop_events.append,
+            )
+        except (OSError, stopping.StopFailure, subprocess.TimeoutExpired) as error:
             raise AudioFailure("analysis_audio_ffmpeg_failed") from error
+        if stopped_job is not None:
+            for status in stop_events:
+                emitter.emit("progress", {"stage": "analysis_stop", "status": status})
+            raise AudioStopped(stopped_job["job_id"])
+        assert completed is not None
         if completed.returncode != 0:
             raise AudioFailure("analysis_audio_ffmpeg_failed")
         wav = validate_wav(wav_partial)
@@ -332,6 +356,11 @@ def main() -> int:
     try:
         result = generate(request, emitter)
         emitter.emit("finished", {"outcome": "succeeded", "result": result})
+    except AudioStopped as stopped:
+        emitter.emit("finished", {
+            "outcome": "stopped",
+            "result": {"job_id": stopped.job_id, "state": "stopped", "reason": "user_requested"},
+        })
     except AudioFailure as error:
         emitter.emit("error", {"code": error.code})
         emitter.emit("finished", {"outcome": "failed", "code": error.code})

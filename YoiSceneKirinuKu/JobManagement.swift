@@ -110,6 +110,7 @@ struct AnalysisJobConfiguration: Sendable {
 protocol AnalysisJobServicing: Sendable {
     func createJob(sourceURL: URL, characterIDs: [UUID], requestID: UUID) async -> AnalysisJobOutcome
     func recoverJob(requestID: UUID) async -> AnalysisJobOutcome
+    func resumeJob(requestID: UUID) async -> AnalysisJobOutcome
 }
 
 final class AnalysisJobService: AnalysisJobServicing, @unchecked Sendable {
@@ -157,6 +158,13 @@ final class AnalysisJobService: AnalysisJobServicing, @unchecked Sendable {
             return .failure(.jobInvalid)
         }
         return await execute(operation: "recover_job", job: job, requestID: requestID, configuration: configuration)
+    }
+
+    func resumeJob(requestID: UUID) async -> AnalysisJobOutcome {
+        guard let configuration,
+              let job = try? Self.loadJob(from: configuration.workspaceRootURL),
+              job.state == .stopped else { return .failure(.jobInvalid) }
+        return await execute(operation: "resume_job", job: job, requestID: requestID, configuration: configuration)
     }
 
     private static func jobURL(in workspace: URL) -> URL {

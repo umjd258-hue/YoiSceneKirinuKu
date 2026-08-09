@@ -834,6 +834,8 @@ VAD結果から、後段の人物判定と品質判定が共通して使用す�
 - 停止時のpartial非正式化、正式成果物の再利用条件を正式決定する。
 - 停止後状態の検証項目を正式決定する。
 
+2026-08-10、既存cooperative stop実験とprocess group補足実験を根拠に、第14開始Gateを通過済みとする。`stop.requested`所有・状態遷移、対象process group限定の`SIGTERM`、5秒猶予後の限定`SIGKILL`、基本3event内の`finished(outcome: stopped)`、partial非正式化、停止後検証、正式成果物だけの再開を`ARCHITECTURE.md`第8.10節へ正本化した。App Sandbox下の成立性と配布構成は第22開始Gateへ維持する。これは第14本体の完了を意味しない。
+
 ## 今回の目的
 
 停止要求と停止完了を分離し、安全な境界で解析を停止・再開できるようにする。
@@ -871,6 +873,8 @@ VAD結果から、後段の人物判定と品質判定が共通して使用す�
 ## テスト・確認
 
 - 各安全境界、FFmpeg実行中、stale要求、強制終了、partialのみ、fingerprint不一致。
+
+2026-08-10、第14段階を完了した。process group補足実験12試行、Python単体テスト全49件、第14関連Swift単体テスト5件、Debugビルド、plist・project検査、`git diff --check`が成功した。停止要求と停止完了、開始前停止、実行中FFmpegの対象group限定終了、猶予後強制終了候補、順序付き停止通信、partial非正式化、正式`stopped`状態、fingerprintと正式成果物だけを使う再開を確認した。既知のSwift全体テストはユーザー指示により再実行していない。詳細は`DECISIONS.md`に記録する。
 
 ---
 

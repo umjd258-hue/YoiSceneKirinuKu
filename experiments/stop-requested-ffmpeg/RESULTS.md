@@ -117,3 +117,13 @@ return code 255だけを停止判定の根拠にはしていない。FFmpeg終�
 - アプリ・Pythonの強制終了後の復旧
 
 これらは対応する開始Gateまで未決定とし、Codexが今回の結果から推測して確定してはいけない。
+
+## 第14開始Gate補足：process group停止
+
+`process_group_stop_experiment.py`を同一条件で2回実行し、各実行で次を3試行ずつ確認した。
+
+- FFmpegを新しいsession／process groupで起動し、そのgroupだけへ`SIGTERM`を送った6試行は、return code 255、強制終了なし、process残存なし、partialあり、正式成果物なしだった。
+- `SIGTERM`を無視する人工親子processを同じgroupで起動した6試行は、5秒猶予後に同じgroupだけへ`SIGKILL`を送り、return code -9、親子とも残存なしだった。
+- 全12試行が機械判定で合格した。`pkill`、process名検索、他groupへのsignalは使用していない。
+
+実験のpoll 0.05秒、起動deadline 3秒、猶予5秒、強制終了後deadline 10秒、人工FFmpeg引数は検証条件である。第14の初期版契約は別途正本化し、App Sandbox下のsignal／process group成立性と配布構成は未検証のまま第22開始Gateへ残す。

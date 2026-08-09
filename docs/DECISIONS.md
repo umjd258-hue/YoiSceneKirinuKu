@@ -1334,3 +1334,67 @@ schema、正式化・再利用、生成数値、境界、安定ID、所有権、
 ### Stage判定
 
 第13固有の自動テスト、Python全テスト、Debugビルドが再度成功し、全体テストの停止が第13変更の実行経路外であるため、第13段階の完了判定を維持する。Swift全体テスト完走または後続Gateの未決定事項解消を意味しない。
+
+---
+
+## 2026-08-10：第14開始Gateの停止・再開契約
+
+### 対象Stage
+
+第14段階「解析停止と途中再開」開始Gate
+
+### 決定事項
+
+- Swift所有の`stop.requested`と`job.json.stop_requested`を停止要求とし、停止要求と停止完了を分離する。
+- Pythonは長時間FFmpegを新しいprocess groupで所有し、有効要求時にそのgroupだけへ`SIGTERM`、5秒後も残る場合だけ同じgroupへ`SIGKILL`を送り、終了を確認する。
+- 独立eventは追加せず、順序付き`progress`後の`finished(outcome: stopped)`を停止完了通信に使用する。
+- process終了、partial非正式化、後続工程非開始、Source fingerprint、正式job状態を検証後にだけ`stopped`へ進める。
+- 再開は正式`stopped`、marker不在、fingerprint一致、許可された正式成果物の再検証を必須とし、partialを再利用しない。
+
+### 理由
+
+既存実験に加え、process group限定`SIGTERM`と、signalを無視する人工親子への限定`SIGKILL`を各6回確認し、対象外processへ広げず親子残存なしを確認できた。基本3eventを維持すれば、未知event追加を避けつつ停止理由をterminal outcomeとして厳密に表せる。
+
+### 未決定・未検証事項
+
+- App Sandbox下のprocess group／signalと、完成版Python・FFmpeg配置は第22開始Gateまで未検証・未決定とする。
+- アプリ自体の異常終了後に外部processが残る条件は配布構成と合わせて第22開始Gateで再検証する。
+
+### Gate判定
+
+第14開始に必要な停止要求、子process終了、signal・猶予・強制終了、通信、停止後検証、再開契約を正本化したため、第14開始Gateを通過済みとする。第14本体は未完了である。
+
+---
+
+## 2026-08-10：第14段階の実装・最終検証
+
+### 対象Stage
+
+第14段階「解析停止と途中再開」
+
+### 実装内容
+
+- Swiftの停止要求Serviceが、正式`running` jobだけに厳密な`stop.requested`を作成し、jobを次revisionの`stop_requested`へ更新するようにした。
+- Python共通停止処理が有効markerを検証し、所有するFFmpeg process groupだけを正式契約のsignal・猶予で終了するようにした。
+- 解析用音声生成を`Popen`へ移し、FFmpeg開始前と実行中の停止を検知してpartialを正式化せず、停止後検証後だけjobを`stopped`へ進めるようにした。
+- 停止完了は独立eventを増やさず、3件の順序付き`progress`と`finished(outcome: stopped)`としてSwiftで厳密検証する。
+- 正式`stopped` jobは、marker不在、Source fingerprint一致、許可された正式成果物だけを確認後に`preparing`へ再開できるようにした。
+
+### 検証結果
+
+- process group補足実験は初回・再実行とも、FFmpeg終了3件と強制終了が必要な人工親子3件の全試行が成功し、計12試行で対象process残存なしだった。
+- Python構文検査と単体テスト全49件が成功した。第14固有3件でmarker・job状態、停止後正式化、process group終了順序、再開、未知schemaのfail-closedを確認した。
+- `Info.plist`とXcode projectの構文検査が成功した。
+- Debugビルドが成功した。
+- 第14関連Swift単体テスト5件が成功し、停止要求永続化、停止progress順序、`finished(outcome: stopped)`、順序違反拒否を確認した。
+- `git diff --check`が成功した。
+- 既知のXcodeテスト環境下Python subprocess停止を含むSwift全体テストは、ユーザー指示に従い再実行していない。
+
+### 未決定・未検証事項
+
+- App Sandbox下のprocess group／signal、配布版Python・FFmpeg配置、アプリ自体の異常終了後に残る外部processは第22開始Gateまで未検証・未決定とする。
+- 第15以降の人物不明・品質判定・正式結果は先行実装していない。
+
+### Stage判定
+
+Gate契約、停止要求Service、子process停止、停止後検証、停止通信、正式成果物だけの再開と第14固有検証が完了したため、第14段階を完了とする。Swift全体テスト完走または第22 Gateの未検証事項解消を意味しない。

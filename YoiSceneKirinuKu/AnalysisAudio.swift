@@ -25,6 +25,7 @@ struct AnalysisAudioResult: Equatable, Sendable {
 
 enum AnalysisAudioOutcome: Equatable, Sendable {
     case success(AnalysisAudioResult)
+    case stopped(jobID: UUID)
     case failure(AnalysisAudioErrorCode)
 }
 
@@ -168,6 +169,8 @@ enum AnalysisAudioProtocolParser {
         var sequence = 1
         var progressIndex = 0
         let statuses = ["running", "completed"]
+        let stopStatuses = ["stop_requested_detected", "child_exit_observed", "post_stop_state_verified"]
+        var stopIndex = 0
         var recordedError: AnalysisAudioErrorCode?
         var terminal: AnalysisAudioOutcome?
         for line in lines.dropLast() {
@@ -184,12 +187,19 @@ enum AnalysisAudioProtocolParser {
             sequence += 1
             switch type {
             case "progress":
-                guard recordedError == nil, progressIndex < statuses.count,
+                guard recordedError == nil,
                       Set(payload.keys) == Set(["stage", "status"]),
-                      payload["stage"] as? String == "analysis_audio",
-                      payload["status"] as? String == statuses[progressIndex]
-                else { return .failure(.protocolError) }
-                progressIndex += 1
+                      let stage = payload["stage"] as? String,
+                      let status = payload["status"] as? String else { return .failure(.protocolError) }
+                if stage == "analysis_audio", stopIndex == 0, progressIndex < statuses.count,
+                   status == statuses[progressIndex] {
+                    progressIndex += 1
+                } else if stage == "analysis_stop", progressIndex == 1,
+                          stopIndex < stopStatuses.count, status == stopStatuses[stopIndex] {
+                    stopIndex += 1
+                } else {
+                    return .failure(.protocolError)
+                }
             case "error":
                 guard recordedError == nil, progressIndex == 1,
                       Set(payload.keys) == ["code"],
@@ -220,6 +230,17 @@ enum AnalysisAudioProtocolParser {
                         durationMilliseconds: duration,
                         selectedStreamIndex: Int(stream)
                     ))
+                } else if outcome == "stopped", recordedError == nil,
+                          progressIndex == 1, stopIndex == stopStatuses.count,
+                          Set(payload.keys) == Set(["outcome", "result"]),
+                          let result = payload["result"] as? [String: Any],
+                          Set(result.keys) == Set(["job_id", "state", "reason"]),
+                          let rawID = result["job_id"] as? String,
+                          let jobID = UUID(uuidString: rawID),
+                          jobID.uuidString.lowercased() == rawID,
+                          result["state"] as? String == "stopped",
+                          result["reason"] as? String == "user_requested" {
+                    terminal = .stopped(jobID: jobID)
                 } else {
                     return .failure(.protocolError)
                 }
