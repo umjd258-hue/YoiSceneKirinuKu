@@ -11,7 +11,12 @@ struct RootView: View {
                 onSelectVideo: appViewModel.selectVideo,
                 onVideoSelectionFailed: appViewModel.videoSelectionFailed,
                 onOpenAnalysis: appViewModel.navigateToAnalysis,
-                onOpenCharacters: appViewModel.navigateToCharacters
+                onOpenCharacters: appViewModel.navigateToCharacters,
+                draftCharacterIDs: appViewModel.draftCharacterIDs,
+                onBeginCharacterSelection: appViewModel.beginCharacterSelection,
+                onToggleDraftCharacter: appViewModel.toggleDraftCharacter,
+                onConfirmCharacterSelection: appViewModel.confirmCharacterSelection,
+                onCancelCharacterSelection: appViewModel.cancelCharacterSelection
             )
         case .analysis:
             AnalysisView(

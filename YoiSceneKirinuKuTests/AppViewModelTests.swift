@@ -3,9 +3,17 @@ import XCTest
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
+    private let conan = CharacterSummary(
+        id: UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!,
+        name: "コナン"
+    )
+
     private let analysisReadyHome = HomeState(
         video: .ready(fileName: "episode01.mp4", duration: "24分12秒"),
-        characters: .selected(names: ["コナン"]),
+        registeredCharacters: [
+            CharacterSummary(id: UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!, name: "コナン"),
+        ],
+        selectedCharacterIDs: [UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!],
         isAIModelAvailable: true,
         isWorkspaceAvailable: true,
         isAnalysisSlotAvailable: true
@@ -79,63 +87,72 @@ final class AppViewModelTests: XCTestCase {
         var states = [HomeState]()
         states.append(HomeState(
             video: .unselected,
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: .checking,
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: .failed(message: "音声トラックが見つかりません"),
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: .unregistered,
+            registeredCharacters: [],
+            selectedCharacterIDs: [],
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: .unselected,
+            registeredCharacters: [conan],
+            selectedCharacterIDs: [],
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: .selected(names: []),
+            registeredCharacters: [conan],
+            selectedCharacterIDs: [UUID(uuidString: "91ed48b1-fd8a-48d4-aaf3-b7db396971fa")!],
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: false,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: true,
             isWorkspaceAvailable: false,
             isAnalysisSlotAvailable: true
         ))
         states.append(HomeState(
             video: analysisReadyHome.video,
-            characters: analysisReadyHome.characters,
+            registeredCharacters: analysisReadyHome.registeredCharacters,
+            selectedCharacterIDs: analysisReadyHome.selectedCharacterIDs,
             isAIModelAvailable: true,
             isWorkspaceAvailable: true,
             isAnalysisSlotAvailable: false
@@ -153,6 +170,85 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(analysisReadyHome.canStartAnalysis)
     }
 
+    func testCharacterSelectionIsAppliedOnlyWhenConfirmed() {
+        let ran = CharacterSummary(
+            id: UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!,
+            name: "蘭"
+        )
+        var state = analysisReadyHome
+        state.registeredCharacters = [conan, ran]
+        let subject = AppViewModel(homeState: state)
+
+        XCTAssertTrue(subject.beginCharacterSelection())
+        subject.toggleDraftCharacter(conan.id)
+        subject.toggleDraftCharacter(ran.id)
+        XCTAssertEqual(subject.homeState.selectedCharacterIDs, [conan.id])
+
+        subject.confirmCharacterSelection()
+
+        XCTAssertEqual(subject.homeState.selectedCharacterIDs, [ran.id])
+        XCTAssertEqual(subject.homeState.characters, .selected(characters: [ran]))
+        XCTAssertNil(subject.draftCharacterIDs)
+    }
+
+    func testCancellingCharacterSelectionPreservesConfirmedSelection() {
+        let subject = AppViewModel(homeState: analysisReadyHome)
+
+        XCTAssertTrue(subject.beginCharacterSelection())
+        subject.toggleDraftCharacter(conan.id)
+        subject.cancelCharacterSelection()
+
+        XCTAssertEqual(subject.homeState.selectedCharacterIDs, [conan.id])
+        XCTAssertNil(subject.draftCharacterIDs)
+    }
+
+    func testCharacterSelectionSupportsZeroOneAndMultipleCharacters() {
+        let ran = CharacterSummary(
+            id: UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!,
+            name: "蘭"
+        )
+        var state = analysisReadyHome
+        state.registeredCharacters = [conan, ran]
+        state.selectedCharacterIDs = []
+        let subject = AppViewModel(homeState: state)
+
+        XCTAssertEqual(subject.homeState.characters, .unselected)
+        XCTAssertTrue(subject.beginCharacterSelection())
+        subject.toggleDraftCharacter(conan.id)
+        subject.confirmCharacterSelection()
+        XCTAssertEqual(subject.homeState.characters, .selected(characters: [conan]))
+
+        XCTAssertTrue(subject.beginCharacterSelection())
+        subject.toggleDraftCharacter(ran.id)
+        subject.confirmCharacterSelection()
+        XCTAssertEqual(subject.homeState.characters, .selected(characters: [conan, ran]))
+    }
+
+    func testUnknownCharacterIDCannotRemainSelected() {
+        let unknownID = UUID(uuidString: "91ed48b1-fd8a-48d4-aaf3-b7db396971fa")!
+        var state = analysisReadyHome
+        state.selectedCharacterIDs.insert(unknownID)
+        let subject = AppViewModel(homeState: state)
+
+        XCTAssertTrue(subject.beginCharacterSelection())
+        XCTAssertEqual(subject.draftCharacterIDs, [conan.id])
+        subject.toggleDraftCharacter(unknownID)
+        subject.confirmCharacterSelection()
+
+        XCTAssertEqual(subject.homeState.selectedCharacterIDs, [conan.id])
+    }
+
+    func testCharacterSelectionCannotBeginWithoutRegisteredCharacters() {
+        var state = analysisReadyHome
+        state.registeredCharacters = []
+        state.selectedCharacterIDs = []
+        let subject = AppViewModel(homeState: state)
+
+        XCTAssertFalse(subject.beginCharacterSelection())
+        XCTAssertNil(subject.draftCharacterIDs)
+        XCTAssertEqual(subject.homeState.characters, .unregistered)
+    }
+
     func testSuccessfulPreflightUpdatesOnlyVideoState() async {
         let result = PreflightResult(
             fileName: "episode01.mp4",
@@ -167,7 +263,7 @@ final class AppViewModelTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(subject.homeState.video, .ready(fileName: "episode01.mp4", duration: "24分12秒"))
-        XCTAssertEqual(subject.homeState.characters, .unregistered)
+        XCTAssertEqual(subject.homeState.characters, .unselected)
     }
 
     func testPreflightFailureUsesStableUserMessage() async {

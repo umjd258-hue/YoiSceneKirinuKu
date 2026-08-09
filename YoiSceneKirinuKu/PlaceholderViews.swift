@@ -7,7 +7,13 @@ struct HomeView: View {
     let onVideoSelectionFailed: () -> Void
     let onOpenAnalysis: () -> Bool
     let onOpenCharacters: () -> Bool
+    let draftCharacterIDs: Set<UUID>?
+    let onBeginCharacterSelection: () -> Bool
+    let onToggleDraftCharacter: (UUID) -> Void
+    let onConfirmCharacterSelection: () -> Void
+    let onCancelCharacterSelection: () -> Void
     @State private var isVideoImporterPresented = false
+    @State private var isCharacterSelectionPresented = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -40,6 +46,21 @@ struct HomeView: View {
             case .failure:
                 onVideoSelectionFailed()
             }
+        }
+        .sheet(isPresented: $isCharacterSelectionPresented) {
+            CharacterSelectionSheet(
+                characters: state.registeredCharacters,
+                selectedIDs: draftCharacterIDs ?? [],
+                onToggle: onToggleDraftCharacter,
+                onCancel: {
+                    onCancelCharacterSelection()
+                    isCharacterSelectionPresented = false
+                },
+                onConfirm: {
+                    onConfirmCharacterSelection()
+                    isCharacterSelectionPresented = false
+                }
+            )
         }
     }
 
@@ -85,28 +106,68 @@ struct HomeView: View {
             case .unselected:
                 Text("人物を選んでください")
                     .foregroundStyle(.secondary)
-                mockButton("人物を選ぶ")
-            case .selected(let names):
+                characterSelectionButton("人物を選ぶ")
+                Button("人物を管理") { onOpenCharacters() }
+            case .selected(let characters):
                 HStack(spacing: 8) {
-                    ForEach(names, id: \.self) { name in
-                        Text(name)
+                    ForEach(characters) { character in
+                        Text(character.name)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(.quaternary, in: Capsule())
                     }
                 }
-                Text("\(names.count)人")
+                Text("\(characters.count)人")
                     .foregroundStyle(.secondary)
-                mockButton("変更")
+                characterSelectionButton("変更")
+                Button("人物を管理") { onOpenCharacters() }
             }
         }
     }
 
-    private func mockButton(_ title: String) -> some View {
+    private func characterSelectionButton(_ title: String) -> some View {
         Button(title) {
-            // 第2段階では実操作へ接続しない。
+            if onBeginCharacterSelection() {
+                isCharacterSelectionPresented = true
+            }
         }
-        .disabled(true)
+    }
+}
+
+private struct CharacterSelectionSheet: View {
+    let characters: [CharacterSummary]
+    let selectedIDs: Set<UUID>
+    let onToggle: (UUID) -> Void
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("人物を選ぶ")
+                .font(.title2.bold())
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(characters) { character in
+                    Toggle(
+                        character.name,
+                        isOn: Binding(
+                            get: { selectedIDs.contains(character.id) },
+                            set: { _ in onToggle(character.id) }
+                        )
+                    )
+                    .toggleStyle(.checkbox)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("キャンセル", action: onCancel)
+                Button("決定", action: onConfirm)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(minWidth: 360)
+        .padding(24)
     }
 }
 

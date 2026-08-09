@@ -8,34 +8,54 @@ enum HomeVideoState: Equatable {
     case failed(message: String)
 }
 
-enum HomeCharactersMockState: Equatable {
+struct CharacterSummary: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+}
+
+enum HomeCharactersState: Equatable {
     case unregistered
     case unselected
-    case selected(names: [String])
+    case selected(characters: [CharacterSummary])
 }
 
 struct HomeState: Equatable {
     var video: HomeVideoState
-    var characters: HomeCharactersMockState
+    var registeredCharacters: [CharacterSummary]
+    var selectedCharacterIDs: Set<UUID>
     var isAIModelAvailable: Bool
     var isWorkspaceAvailable: Bool
     var isAnalysisSlotAvailable: Bool
 
     static let initial = HomeState(
         video: .unselected,
-        characters: .unregistered,
+        registeredCharacters: [
+            CharacterSummary(id: UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!, name: "コナン"),
+            CharacterSummary(id: UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!, name: "蘭"),
+            CharacterSummary(id: UUID(uuidString: "a0386bc8-7d73-47de-ae6f-7a729255c194")!, name: "灰原"),
+        ],
+        selectedCharacterIDs: [],
         isAIModelAvailable: false,
         isWorkspaceAvailable: false,
         isAnalysisSlotAvailable: false
     )
 
+    var selectedCharacters: [CharacterSummary] {
+        registeredCharacters.filter { selectedCharacterIDs.contains($0.id) }
+    }
+
+    var characters: HomeCharactersState {
+        if registeredCharacters.isEmpty { return .unregistered }
+        let selected = selectedCharacters
+        return selected.isEmpty ? .unselected : .selected(characters: selected)
+    }
+
     var canStartAnalysis: Bool {
-        guard case .ready = video, case .selected(let names) = characters else {
+        guard case .ready = video, !selectedCharacters.isEmpty else {
             return false
         }
 
-        return !names.isEmpty
-            && isAIModelAvailable
+        return isAIModelAvailable
             && isWorkspaceAvailable
             && isAnalysisSlotAvailable
     }
@@ -45,6 +65,7 @@ struct HomeState: Equatable {
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
     @Published private(set) var homeState: HomeState
+    @Published private(set) var draftCharacterIDs: Set<UUID>?
     private let preflightService: any PreflightServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
@@ -70,6 +91,36 @@ final class AppViewModel: ObservableObject {
         preflightTask?.cancel()
         currentPreflightRequestID = nil
         homeState.video = .failed(message: PreflightErrorCode.internalError.userMessage)
+    }
+
+    @discardableResult
+    func beginCharacterSelection() -> Bool {
+        guard route == .home, !homeState.registeredCharacters.isEmpty else { return false }
+        let availableIDs = Set(homeState.registeredCharacters.map(\.id))
+        draftCharacterIDs = homeState.selectedCharacterIDs.intersection(availableIDs)
+        return true
+    }
+
+    func toggleDraftCharacter(_ id: UUID) {
+        guard var draftCharacterIDs,
+              homeState.registeredCharacters.contains(where: { $0.id == id }) else { return }
+        if draftCharacterIDs.contains(id) {
+            draftCharacterIDs.remove(id)
+        } else {
+            draftCharacterIDs.insert(id)
+        }
+        self.draftCharacterIDs = draftCharacterIDs
+    }
+
+    func confirmCharacterSelection() {
+        guard let draftCharacterIDs else { return }
+        let availableIDs = Set(homeState.registeredCharacters.map(\.id))
+        homeState.selectedCharacterIDs = draftCharacterIDs.intersection(availableIDs)
+        self.draftCharacterIDs = nil
+    }
+
+    func cancelCharacterSelection() {
+        draftCharacterIDs = nil
     }
 
     private func apply(_ outcome: PreflightOutcome, requestID: UUID) {
