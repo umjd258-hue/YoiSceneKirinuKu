@@ -1,6 +1,7 @@
 import Combine
+import Foundation
 
-enum HomeVideoMockState: Equatable {
+enum HomeVideoState: Equatable {
     case unselected
     case checking
     case ready(fileName: String, duration: String)
@@ -13,14 +14,14 @@ enum HomeCharactersMockState: Equatable {
     case selected(names: [String])
 }
 
-struct HomeMockState: Equatable {
-    var video: HomeVideoMockState
+struct HomeState: Equatable {
+    var video: HomeVideoState
     var characters: HomeCharactersMockState
     var isAIModelAvailable: Bool
     var isWorkspaceAvailable: Bool
     var isAnalysisSlotAvailable: Bool
 
-    static let initial = HomeMockState(
+    static let initial = HomeState(
         video: .unselected,
         characters: .unregistered,
         isAIModelAvailable: false,
@@ -43,15 +44,60 @@ struct HomeMockState: Equatable {
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
-    let homeMockState: HomeMockState
+    @Published private(set) var homeState: HomeState
+    private let preflightService: any PreflightServicing
+    private var preflightTask: Task<Void, Never>?
+    private var currentPreflightRequestID: UUID?
 
-    init(homeMockState: HomeMockState = .initial) {
-        self.homeMockState = homeMockState
+    init(homeState: HomeState = .initial, preflightService: any PreflightServicing = PreflightService()) {
+        self.homeState = homeState
+        self.preflightService = preflightService
+    }
+
+    func selectVideo(_ url: URL) {
+        preflightTask?.cancel()
+        let requestID = UUID()
+        currentPreflightRequestID = requestID
+        homeState.video = .checking
+        preflightTask = Task { [weak self, preflightService] in
+            let outcome = await preflightService.run(sourceURL: url, requestID: requestID)
+            guard !Task.isCancelled else { return }
+            self?.apply(outcome, requestID: requestID)
+        }
+    }
+
+    func videoSelectionFailed() {
+        preflightTask?.cancel()
+        currentPreflightRequestID = nil
+        homeState.video = .failed(message: PreflightErrorCode.internalError.userMessage)
+    }
+
+    private func apply(_ outcome: PreflightOutcome, requestID: UUID) {
+        guard currentPreflightRequestID == requestID else { return }
+        switch outcome {
+        case .success(let result):
+            homeState.video = .ready(
+                fileName: result.fileName,
+                duration: Self.formatDuration(milliseconds: result.durationMilliseconds)
+            )
+        case .failure(let code):
+            homeState.video = .failed(message: code.userMessage)
+        }
+    }
+
+    private static func formatDuration(milliseconds: Int64) -> String {
+        let totalSeconds = milliseconds / 1_000
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 { return "\(hours)時間\(minutes)分\(seconds)秒" }
+        if minutes > 0 { return "\(minutes)分\(seconds)秒" }
+        return "\(seconds)秒"
     }
 
     @discardableResult
     func navigateToAnalysis() -> Bool {
-        guard homeMockState.canStartAnalysis else {
+        guard homeState.canStartAnalysis else {
             return false
         }
         return transition(from: .home, to: .analysis)

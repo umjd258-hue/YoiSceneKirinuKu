@@ -7,7 +7,9 @@ struct RootView: View {
         switch appViewModel.route {
         case .home:
             HomeView(
-                state: appViewModel.homeMockState,
+                state: appViewModel.homeState,
+                onSelectVideo: appViewModel.selectVideo,
+                onVideoSelectionFailed: appViewModel.videoSelectionFailed,
                 onOpenAnalysis: appViewModel.navigateToAnalysis,
                 onOpenCharacters: appViewModel.navigateToCharacters
             )

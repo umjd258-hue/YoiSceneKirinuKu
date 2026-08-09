@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HomeView: View {
-    let state: HomeMockState
+    let state: HomeState
+    let onSelectVideo: (URL) -> Void
+    let onVideoSelectionFailed: () -> Void
     let onOpenAnalysis: () -> Bool
     let onOpenCharacters: () -> Bool
+    @State private var isVideoImporterPresented = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -12,9 +16,6 @@ struct HomeView: View {
                     .font(.largeTitle.bold())
                 Text("動画・音声は外部へ送信しません")
                     .foregroundStyle(.secondary)
-                Text("第2段階のMock表示です。実ファイルや解析処理には接続していません。")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
             }
 
             VStack(spacing: 16) {
@@ -32,6 +33,14 @@ struct HomeView: View {
         }
         .frame(minWidth: 640, minHeight: 520)
         .padding(32)
+        .fileImporter(isPresented: $isVideoImporterPresented, allowedContentTypes: [.mpeg4Movie]) { result in
+            switch result {
+            case .success(let url):
+                onSelectVideo(url)
+            case .failure:
+                onVideoSelectionFailed()
+            }
+        }
     }
 
     private var videoCard: some View {
@@ -40,7 +49,7 @@ struct HomeView: View {
             case .unselected:
                 Text("動画を選んでください")
                     .foregroundStyle(.secondary)
-                mockButton("動画を選ぶ")
+                videoSelectionButton("動画を選ぶ")
             case .checking:
                 ProgressView("動画を確認しています…")
             case .ready(let fileName, let duration):
@@ -48,15 +57,19 @@ struct HomeView: View {
                     .font(.headline)
                 Text(duration)
                     .foregroundStyle(.secondary)
-                mockButton("変更")
+                videoSelectionButton("変更")
             case .failed(let message):
                 Label("この動画は解析できません", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                 Text(message)
                     .foregroundStyle(.secondary)
-                mockButton("変更")
+                videoSelectionButton("変更")
             }
         }
+    }
+
+    private func videoSelectionButton(_ title: String) -> some View {
+        Button(title) { isVideoImporterPresented = true }
     }
 
     private var charactersCard: some View {
