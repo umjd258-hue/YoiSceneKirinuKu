@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from uuid import UUID
 
 PROTOCOL_VERSION = 1
 ERROR_CODES = {
@@ -48,7 +49,7 @@ class EventWriter:
 
 
 def valid_request(value):
-    return (
+    structurally_valid = (
         isinstance(value, dict)
         and set(value) == {"protocol_version", "request_id", "operation", "source_path"}
         and value.get("protocol_version") == PROTOCOL_VERSION
@@ -57,6 +58,13 @@ def valid_request(value):
         and isinstance(value.get("source_path"), str)
         and os.path.isabs(value["source_path"])
     )
+    if not structurally_valid:
+        return False
+    try:
+        request_id = UUID(value["request_id"])
+    except ValueError:
+        return False
+    return request_id.version == 4 and str(request_id) == value["request_id"]
 
 
 def main():
@@ -74,10 +82,10 @@ def main():
     if source.suffix.lower() != ".mp4":
         writer.fail("unsupported_file_type")
         return 0
-    if not source.exists() or not source.is_file():
+    if not source.exists():
         writer.fail("input_not_found")
         return 0
-    if not os.access(source, os.R_OK):
+    if source.is_symlink() or not source.is_file() or not os.access(source, os.R_OK):
         writer.fail("input_not_readable")
         return 0
 

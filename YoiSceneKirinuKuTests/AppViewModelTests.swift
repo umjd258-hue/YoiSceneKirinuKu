@@ -184,9 +184,11 @@ final class AppViewModelTests: XCTestCase {
         let service = ControlledPreflightService()
         let subject = AppViewModel(preflightService: service)
         subject.selectVideo(URL(fileURLWithPath: "/tmp/old.mp4"))
+        await Task.yield()
         subject.selectVideo(URL(fileURLWithPath: "/tmp/new.mp4"))
+        await Task.yield()
 
-        await service.resumeAll(with: .success(PreflightResult(
+        await service.resume(fileName: "old.mp4", with: .success(PreflightResult(
             fileName: "old.mp4",
             durationMilliseconds: 1_000,
             containerFormat: "mp4",
@@ -195,7 +197,18 @@ final class AppViewModelTests: XCTestCase {
         )))
         await Task.yield()
 
-        XCTAssertNotEqual(subject.homeState.video, .ready(fileName: "old.mp4", duration: "1秒"))
+        XCTAssertEqual(subject.homeState.video, .checking)
+
+        await service.resume(fileName: "new.mp4", with: .success(PreflightResult(
+            fileName: "new.mp4",
+            durationMilliseconds: 2_000,
+            containerFormat: "mp4",
+            videoStreamCount: 1,
+            audioStreamCount: 1
+        )))
+        await Task.yield()
+
+        XCTAssertEqual(subject.homeState.video, .ready(fileName: "new.mp4", duration: "2秒"))
     }
 
     func testProtocolParserAcceptsCompleteSuccessfulContract() throws {
@@ -256,6 +269,65 @@ final class AppViewModelTests: XCTestCase {
         )
     }
 
+    func testProtocolParserMapsUnknownErrorCodeToInternalError() throws {
+        let requestID = UUID()
+        let events = [
+            event(type: "error", requestID: requestID, sequence: 1, payload: ["code": "future_error"]),
+            event(type: "finished", requestID: requestID, sequence: 2, payload: ["outcome": "failed", "code": "future_error"]),
+        ]
+        let stdout = try events.map {
+            try JSONSerialization.data(withJSONObject: $0)
+        }.reduce(into: Data()) {
+            $0.append($1)
+            $0.append(0x0A)
+        }
+
+        XCTAssertEqual(
+            PreflightProtocolParser.parse(stdout: stdout, requestID: requestID, terminationStatus: 0, terminationReason: .exit),
+            .failure(.internalError)
+        )
+    }
+
+    func testProtocolParserRejectsNonIntegerDuration() throws {
+        let requestID = UUID()
+        let finished = event(type: "finished", requestID: requestID, sequence: 1, payload: [
+            "outcome": "succeeded",
+            "result": [
+                "file_name": "sample.mp4",
+                "duration_ms": 1.5,
+                "container_format": "mp4",
+                "video_stream_count": 1,
+                "audio_stream_count": 1,
+            ],
+        ])
+        let stdout = try JSONSerialization.data(withJSONObject: finished) + Data([0x0A])
+
+        XCTAssertEqual(
+            PreflightProtocolParser.parse(stdout: stdout, requestID: requestID, terminationStatus: 0, terminationReason: .exit),
+            .failure(.protocolError)
+        )
+    }
+
+    func testProtocolParserRejectsBooleanDuration() throws {
+        let requestID = UUID()
+        let finished = event(type: "finished", requestID: requestID, sequence: 1, payload: [
+            "outcome": "succeeded",
+            "result": [
+                "file_name": "sample.mp4",
+                "duration_ms": true,
+                "container_format": "mp4",
+                "video_stream_count": 1,
+                "audio_stream_count": 1,
+            ],
+        ])
+        let stdout = try JSONSerialization.data(withJSONObject: finished) + Data([0x0A])
+
+        XCTAssertEqual(
+            PreflightProtocolParser.parse(stdout: stdout, requestID: requestID, terminationStatus: 0, terminationReason: .exit),
+            .failure(.protocolError)
+        )
+    }
+
     private func event(type: String, requestID: UUID, sequence: Int, payload: [String: Any]) -> [String: Any] {
         [
             "protocol_version": 1,
@@ -274,15 +346,13 @@ private struct ImmediatePreflightService: PreflightServicing {
 }
 
 private actor ControlledPreflightService: PreflightServicing {
-    private var continuations = [CheckedContinuation<PreflightOutcome, Never>]()
+    private var continuations = [String: CheckedContinuation<PreflightOutcome, Never>]()
 
     func run(sourceURL: URL, requestID: UUID) async -> PreflightOutcome {
-        await withCheckedContinuation { continuations.append($0) }
+        await withCheckedContinuation { continuations[sourceURL.lastPathComponent] = $0 }
     }
 
-    func resumeAll(with outcome: PreflightOutcome) {
-        let pending = continuations
-        continuations.removeAll()
-        pending.forEach { $0.resume(returning: outcome) }
+    func resume(fileName: String, with outcome: PreflightOutcome) {
+        continuations.removeValue(forKey: fileName)?.resume(returning: outcome)
     }
 }

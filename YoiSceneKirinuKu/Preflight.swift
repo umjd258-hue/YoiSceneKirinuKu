@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 enum PreflightErrorCode: String, Codable, CaseIterable, Sendable {
     case invalidRequest = "invalid_request"
@@ -132,7 +133,9 @@ final class PreflightService: PreflightServicing, @unchecked Sendable {
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
-        controller.set(process)
+        guard controller.register(process) else {
+            return .failure(.internalError)
+        }
 
         let request: [String: Any] = [
             "protocol_version": 1,
@@ -148,7 +151,11 @@ final class PreflightService: PreflightServicing, @unchecked Sendable {
         do {
             try process.run()
         } catch {
+            controller.clear(process)
             return .failure(.probeNotStarted)
+        }
+        if controller.isCancellationRequested {
+            controller.terminate()
         }
 
         let streamGroup = DispatchGroup()
@@ -221,6 +228,7 @@ enum PreflightProtocolParser {
 
         var expectedSequence = 1
         var errorCode: PreflightErrorCode?
+        var errorRawCode: String?
         var terminalOutcome: PreflightOutcome?
         var didFinish = false
 
@@ -247,11 +255,11 @@ enum PreflightProtocolParser {
                 }
             case "error":
                 guard errorCode == nil,
-                      let rawCode = payload["code"] as? String,
-                      let code = PreflightErrorCode(rawValue: rawCode) else {
+                      let rawCode = payload["code"] as? String else {
                     return .failure(.protocolError)
                 }
-                errorCode = code
+                errorRawCode = rawCode
+                errorCode = PreflightErrorCode(rawValue: rawCode) ?? .internalError
             case "finished":
                 didFinish = true
                 guard let outcome = payload["outcome"] as? String else {
@@ -259,8 +267,8 @@ enum PreflightProtocolParser {
                 }
                 if outcome == "failed" {
                     guard let rawCode = payload["code"] as? String,
-                          let code = PreflightErrorCode(rawValue: rawCode),
-                          code == errorCode else {
+                          rawCode == errorRawCode,
+                          let code = errorCode else {
                         return .failure(.protocolError)
                     }
                     terminalOutcome = .failure(code)
@@ -284,29 +292,50 @@ enum PreflightProtocolParser {
     private static func parseResult(_ value: Any?) -> PreflightResult? {
         guard let value = value as? [String: Any],
               let fileName = value["file_name"] as? String, !fileName.isEmpty,
-              let duration = value["duration_ms"] as? NSNumber,
+              let duration = exactPositiveInteger(value["duration_ms"]),
               let format = value["container_format"] as? String, !format.isEmpty,
-              let videoCount = value["video_stream_count"] as? Int, videoCount > 0,
-              let audioCount = value["audio_stream_count"] as? Int, audioCount > 0,
-              duration.int64Value > 0 else {
+              let videoCountValue = exactPositiveInteger(value["video_stream_count"]),
+              let audioCountValue = exactPositiveInteger(value["audio_stream_count"]),
+              videoCountValue <= Int64(Int.max),
+              audioCountValue <= Int64(Int.max) else {
             return nil
         }
         return PreflightResult(
             fileName: fileName,
-            durationMilliseconds: duration.int64Value,
+            durationMilliseconds: duration,
             containerFormat: format,
-            videoStreamCount: videoCount,
-            audioStreamCount: audioCount
+            videoStreamCount: Int(videoCountValue),
+            audioStreamCount: Int(audioCountValue)
         )
+    }
+
+    private static func exactPositiveInteger(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite,
+              number.doubleValue == Double(number.int64Value),
+              number.int64Value > 0 else {
+            return nil
+        }
+        return number.int64Value
     }
 }
 
 private final class PreflightProcessController: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
+    private var cancellationRequested = false
 
-    func set(_ process: Process) {
-        lock.withLock { self.process = process }
+    var isCancellationRequested: Bool {
+        lock.withLock { cancellationRequested }
+    }
+
+    func register(_ process: Process) -> Bool {
+        lock.withLock {
+            guard !cancellationRequested else { return false }
+            self.process = process
+            return true
+        }
     }
 
     func clear(_ process: Process) {
@@ -316,9 +345,11 @@ private final class PreflightProcessController: @unchecked Sendable {
     }
 
     func terminate() {
-        lock.withLock {
-            if process?.isRunning == true { process?.terminate() }
+        let registeredProcess = lock.withLock {
+            cancellationRequested = true
+            return process
         }
+        if registeredProcess?.isRunning == true { registeredProcess?.terminate() }
     }
 }
 
