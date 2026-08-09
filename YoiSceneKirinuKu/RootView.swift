@@ -34,7 +34,20 @@ struct RootView: View {
                 onReturnHome: appViewModel.returnHome
             )
         case .characters:
-            CharactersView(onReturnHome: appViewModel.returnHome)
+            CharactersView(
+                registeredCharacters: appViewModel.homeState.registeredCharacters,
+                registration: appViewModel.newCharacterRegistration,
+                onBeginRegistration: appViewModel.beginNewCharacterRegistration,
+                onUpdateName: appViewModel.updateNewCharacterName,
+                onSelectVideo: appViewModel.selectNewCharacterVideo,
+                onVideoSelectionFailed: appViewModel.newCharacterVideoSelectionFailed,
+                onUpdateCurrentPosition: appViewModel.updateNewCharacterCurrentPosition,
+                onSetRangeStart: appViewModel.setNewCharacterRangeStart,
+                onSetRangeEnd: appViewModel.setNewCharacterRangeEnd,
+                onRequestRegistration: appViewModel.requestNewCharacterRegistration,
+                onCancelRegistration: appViewModel.cancelNewCharacterRegistration,
+                onReturnHome: appViewModel.returnHome
+            )
         }
     }
 }

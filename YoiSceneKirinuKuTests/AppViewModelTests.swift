@@ -422,6 +422,104 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertFalse(candidateMirrorLabels.contains(where: { $0.lowercased().contains("probability") }))
     }
 
+    func testNewCharacterRegistrationCanBeginOnlyFromCharacters() {
+        let subject = AppViewModel()
+
+        XCTAssertFalse(subject.beginNewCharacterRegistration())
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+        XCTAssertTrue(subject.newCharacterRegistration.isPresented)
+        XCTAssertFalse(subject.beginNewCharacterRegistration())
+    }
+
+    func testNewCharacterRegistrationRequiresNameVideoAndValidRange() {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+
+        subject.updateNewCharacterName("コナン")
+        subject.selectNewCharacterVideo(
+            URL(fileURLWithPath: "/tmp/episode01.mp4"),
+            durationMilliseconds: 20_000
+        )
+        XCTAssertFalse(subject.newCharacterRegistration.canRequestRegistration)
+
+        subject.updateNewCharacterCurrentPosition(10_000)
+        subject.setNewCharacterRangeStart()
+        subject.updateNewCharacterCurrentPosition(5_000)
+        subject.setNewCharacterRangeEnd()
+        XCTAssertFalse(subject.newCharacterRegistration.hasValidRange)
+        XCTAssertFalse(subject.requestNewCharacterRegistration())
+
+        subject.updateNewCharacterCurrentPosition(15_000)
+        subject.setNewCharacterRangeEnd()
+        XCTAssertTrue(subject.newCharacterRegistration.hasValidRange)
+        XCTAssertTrue(subject.newCharacterRegistration.canRequestRegistration)
+    }
+
+    func testRegistrationRequestDoesNotAddCharacterBeforeFormalCompletion() {
+        let subject = AppViewModel()
+        let initialCharacters = subject.homeState.registeredCharacters
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+        subject.updateNewCharacterName("新規人物")
+        subject.selectNewCharacterVideo(
+            URL(fileURLWithPath: "/tmp/registration.mp4"),
+            durationMilliseconds: 30_000
+        )
+        subject.updateNewCharacterCurrentPosition(2_000)
+        subject.setNewCharacterRangeStart()
+        subject.updateNewCharacterCurrentPosition(9_000)
+        subject.setNewCharacterRangeEnd()
+
+        XCTAssertTrue(subject.requestNewCharacterRegistration())
+        XCTAssertEqual(subject.newCharacterRegistration.phase, .registrationRequested)
+        XCTAssertEqual(subject.homeState.registeredCharacters, initialCharacters)
+
+        XCTAssertTrue(subject.confirmNewCharacterRegistrationCompleted())
+        XCTAssertEqual(subject.newCharacterRegistration.phase, .registered)
+        XCTAssertEqual(subject.homeState.registeredCharacters, initialCharacters)
+    }
+
+    func testCancellingNewCharacterRegistrationDiscardsDraft() {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+        subject.updateNewCharacterName("一時入力")
+        subject.selectNewCharacterVideo(
+            URL(fileURLWithPath: "/tmp/registration.mp4"),
+            durationMilliseconds: 30_000
+        )
+
+        subject.cancelNewCharacterRegistration()
+
+        XCTAssertEqual(subject.newCharacterRegistration, NewCharacterRegistrationState())
+        XCTAssertEqual(subject.route, .characters)
+    }
+
+    func testRegistrationPositionAndInvalidVideoAreSafelyBounded() {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+
+        subject.selectNewCharacterVideo(
+            URL(fileURLWithPath: "/tmp/registration.mp4"),
+            durationMilliseconds: 10_000
+        )
+        subject.updateNewCharacterCurrentPosition(-1_000)
+        XCTAssertEqual(subject.newCharacterRegistration.currentPositionMilliseconds, 0)
+        subject.updateNewCharacterCurrentPosition(50_000)
+        XCTAssertEqual(subject.newCharacterRegistration.currentPositionMilliseconds, 10_000)
+
+        subject.selectNewCharacterVideo(
+            URL(fileURLWithPath: "/tmp/broken.mp4"),
+            durationMilliseconds: 0
+        )
+        XCTAssertNil(subject.newCharacterRegistration.videoURL)
+        XCTAssertFalse(subject.newCharacterRegistration.canRequestRegistration)
+        XCTAssertNotNil(subject.newCharacterRegistration.videoErrorMessage)
+    }
+
     func testSuccessfulPreflightUpdatesOnlyVideoState() async {
         let result = PreflightResult(
             fileName: "episode01.mp4",

@@ -243,6 +243,42 @@ struct ResultsState: Equatable {
     }
 }
 
+enum NewCharacterRegistrationPhase: Equatable {
+    case editing
+    case registrationRequested
+    case registered
+}
+
+struct NewCharacterRegistrationState: Equatable {
+    var isPresented = false
+    var name = ""
+    var videoURL: URL?
+    var videoDurationMilliseconds: Int64?
+    var currentPositionMilliseconds: Int64 = 0
+    var startMilliseconds: Int64?
+    var endMilliseconds: Int64?
+    var phase: NewCharacterRegistrationPhase = .editing
+    var videoErrorMessage: String?
+
+    var videoFileName: String? { videoURL?.lastPathComponent }
+
+    var hasValidRange: Bool {
+        guard let startMilliseconds,
+              let endMilliseconds,
+              let videoDurationMilliseconds else { return false }
+        return startMilliseconds >= 0
+            && startMilliseconds < endMilliseconds
+            && endMilliseconds <= videoDurationMilliseconds
+    }
+
+    var canRequestRegistration: Bool {
+        phase == .editing
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && videoURL != nil
+            && hasValidRange
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
@@ -250,6 +286,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var draftCharacterIDs: Set<UUID>?
     @Published private(set) var analysisState: AnalysisState
     @Published private(set) var resultsState: ResultsState
+    @Published private(set) var newCharacterRegistration = NewCharacterRegistrationState()
     private let preflightService: any PreflightServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
@@ -367,6 +404,82 @@ final class AppViewModel: ObservableObject {
         } else {
             resultsState.expandedGroupIDs.insert(groupID)
         }
+    }
+
+    @discardableResult
+    func beginNewCharacterRegistration() -> Bool {
+        guard route == .characters, !newCharacterRegistration.isPresented else { return false }
+        newCharacterRegistration = NewCharacterRegistrationState(isPresented: true)
+        return true
+    }
+
+    func updateNewCharacterName(_ name: String) {
+        guard newCharacterRegistration.isPresented,
+              newCharacterRegistration.phase == .editing else { return }
+        newCharacterRegistration.name = name
+    }
+
+    func selectNewCharacterVideo(_ url: URL, durationMilliseconds: Int64) {
+        guard newCharacterRegistration.isPresented,
+              newCharacterRegistration.phase == .editing else { return }
+        guard durationMilliseconds > 0 else {
+            newCharacterRegistration.videoURL = nil
+            newCharacterRegistration.videoDurationMilliseconds = nil
+            newCharacterRegistration.videoErrorMessage = "動画を読み込めませんでした。"
+            return
+        }
+        newCharacterRegistration.videoURL = url
+        newCharacterRegistration.videoDurationMilliseconds = durationMilliseconds
+        newCharacterRegistration.currentPositionMilliseconds = 0
+        newCharacterRegistration.startMilliseconds = nil
+        newCharacterRegistration.endMilliseconds = nil
+        newCharacterRegistration.videoErrorMessage = nil
+    }
+
+    func newCharacterVideoSelectionFailed() {
+        guard newCharacterRegistration.isPresented,
+              newCharacterRegistration.phase == .editing else { return }
+        newCharacterRegistration.videoURL = nil
+        newCharacterRegistration.videoDurationMilliseconds = nil
+        newCharacterRegistration.videoErrorMessage = "動画を読み込めませんでした。"
+    }
+
+    func updateNewCharacterCurrentPosition(_ milliseconds: Int64) {
+        guard newCharacterRegistration.isPresented,
+              let duration = newCharacterRegistration.videoDurationMilliseconds else { return }
+        newCharacterRegistration.currentPositionMilliseconds = min(max(0, milliseconds), duration)
+    }
+
+    func setNewCharacterRangeStart() {
+        guard newCharacterRegistration.isPresented,
+              newCharacterRegistration.phase == .editing,
+              newCharacterRegistration.videoURL != nil else { return }
+        newCharacterRegistration.startMilliseconds = newCharacterRegistration.currentPositionMilliseconds
+    }
+
+    func setNewCharacterRangeEnd() {
+        guard newCharacterRegistration.isPresented,
+              newCharacterRegistration.phase == .editing,
+              newCharacterRegistration.videoURL != nil else { return }
+        newCharacterRegistration.endMilliseconds = newCharacterRegistration.currentPositionMilliseconds
+    }
+
+    @discardableResult
+    func requestNewCharacterRegistration() -> Bool {
+        guard newCharacterRegistration.canRequestRegistration else { return false }
+        newCharacterRegistration.phase = .registrationRequested
+        return true
+    }
+
+    @discardableResult
+    func confirmNewCharacterRegistrationCompleted() -> Bool {
+        guard newCharacterRegistration.phase == .registrationRequested else { return false }
+        newCharacterRegistration.phase = .registered
+        return true
+    }
+
+    func cancelNewCharacterRegistration() {
+        newCharacterRegistration = NewCharacterRegistrationState()
     }
 
     private func apply(_ outcome: PreflightOutcome, requestID: UUID) {

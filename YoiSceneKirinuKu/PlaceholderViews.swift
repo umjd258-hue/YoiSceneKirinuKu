@@ -1,3 +1,5 @@
+import AVFoundation
+import AVKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -414,14 +416,227 @@ struct ResultsView: View {
 }
 
 struct CharactersView: View {
+    let registeredCharacters: [CharacterSummary]
+    let registration: NewCharacterRegistrationState
+    let onBeginRegistration: () -> Bool
+    let onUpdateName: (String) -> Void
+    let onSelectVideo: (URL, Int64) -> Void
+    let onVideoSelectionFailed: () -> Void
+    let onUpdateCurrentPosition: (Int64) -> Void
+    let onSetRangeStart: () -> Void
+    let onSetRangeEnd: () -> Void
+    let onRequestRegistration: () -> Bool
+    let onCancelRegistration: () -> Void
     let onReturnHome: () -> Bool
 
     var body: some View {
-        PlaceholderContainer(title: "人物管理（仮画面）") {
-            Button("ホームへ戻る") {
-                onReturnHome()
+        VStack(alignment: .leading, spacing: 20) {
+            Text("人物管理")
+                .font(.largeTitle.bold())
+
+            if registeredCharacters.isEmpty {
+                ContentUnavailableView("登録人物がいません", systemImage: "person.crop.circle.badge.plus")
+            } else {
+                List(registeredCharacters) { character in
+                    Text(character.name)
+                }
+                .frame(minHeight: 260)
+            }
+
+            HStack {
+                Button("新規人物を登録") { onBeginRegistration() }
+                Spacer()
+                Button("ホームへ戻る") { onReturnHome() }
             }
         }
+        .frame(minWidth: 720, minHeight: 520)
+        .padding(24)
+        .sheet(
+            isPresented: Binding(
+                get: { registration.isPresented },
+                set: { if !$0 { onCancelRegistration() } }
+            )
+        ) {
+            NewCharacterRegistrationView(
+                state: registration,
+                onUpdateName: onUpdateName,
+                onSelectVideo: onSelectVideo,
+                onVideoSelectionFailed: onVideoSelectionFailed,
+                onUpdateCurrentPosition: onUpdateCurrentPosition,
+                onSetRangeStart: onSetRangeStart,
+                onSetRangeEnd: onSetRangeEnd,
+                onRequestRegistration: onRequestRegistration,
+                onCancel: onCancelRegistration
+            )
+        }
+    }
+}
+
+private struct NewCharacterRegistrationView: View {
+    let state: NewCharacterRegistrationState
+    let onUpdateName: (String) -> Void
+    let onSelectVideo: (URL, Int64) -> Void
+    let onVideoSelectionFailed: () -> Void
+    let onUpdateCurrentPosition: (Int64) -> Void
+    let onSetRangeStart: () -> Void
+    let onSetRangeEnd: () -> Void
+    let onRequestRegistration: () -> Bool
+    let onCancel: () -> Void
+    @State private var isVideoImporterPresented = false
+    @State private var player = AVPlayer()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("新規人物を登録")
+                .font(.title.bold())
+
+            switch state.phase {
+            case .editing:
+                editor
+            case .registrationRequested:
+                ProgressView("登録処理の完了を待っています…")
+                Text("登録要求中です。処理が正式に完了するまで人物一覧には追加されません。")
+                    .foregroundStyle(.secondary)
+            case .registered:
+                ContentUnavailableView("人物登録が完了しました", systemImage: "checkmark.circle")
+            }
+
+            HStack {
+                Button(state.phase == .editing ? "キャンセル" : "閉じる") { onCancel() }
+                Spacer()
+                if state.phase == .editing {
+                    Button("この人物を登録") { onRequestRegistration() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!state.canRequestRegistration)
+                }
+            }
+        }
+        .frame(minWidth: 680, minHeight: 620)
+        .padding(24)
+        .fileImporter(
+            isPresented: $isVideoImporterPresented,
+            allowedContentTypes: [.mpeg4Movie],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else {
+                onVideoSelectionFailed()
+                return
+            }
+            loadVideo(url)
+        }
+        .onChange(of: state.videoURL) { _, url in
+            player.replaceCurrentItem(with: url.map(AVPlayerItem.init(url:)))
+        }
+        .onDisappear { player.pause() }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            TextField(
+                "人物名",
+                text: Binding(get: { state.name }, set: onUpdateName)
+            )
+
+            HStack {
+                Button("MP4を選ぶ") { isVideoImporterPresented = true }
+                Text(state.videoFileName ?? "未選択")
+                    .foregroundStyle(.secondary)
+            }
+
+            if let message = state.videoErrorMessage {
+                Text(message)
+                    .foregroundStyle(.red)
+            }
+
+            VideoPlayer(player: player)
+                .frame(height: 280)
+                .background(Color.black)
+
+            HStack {
+                Button("−5秒") { seek(by: -5_000) }
+                    .disabled(state.videoURL == nil)
+                Button(player.timeControlStatus == .playing ? "一時停止" : "再生") { togglePlayback() }
+                    .disabled(state.videoURL == nil)
+                Button("＋5秒") { seek(by: 5_000) }
+                    .disabled(state.videoURL == nil)
+                Spacer()
+                Text("現在位置 \(Self.format(state.currentPositionMilliseconds))")
+                    .monospacedDigit()
+            }
+
+            LabeledContent("開始", value: state.startMilliseconds.map(Self.format) ?? "未設定")
+            Button("現在位置を開始に") {
+                syncCurrentPosition()
+                onSetRangeStart()
+            }
+            .disabled(state.videoURL == nil)
+
+            LabeledContent("終了", value: state.endMilliseconds.map(Self.format) ?? "未設定")
+            Button("現在位置を終了に") {
+                syncCurrentPosition()
+                onSetRangeEnd()
+            }
+            .disabled(state.videoURL == nil)
+
+            Button("選択範囲を再生") { playSelectedRange() }
+                .disabled(!state.hasValidRange)
+
+            Text("できるだけ、本人だけの声がはっきり聞こえる場面を選んでください。")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadVideo(_ url: URL) {
+        Task { @MainActor in
+            do {
+                let duration = try await AVURLAsset(url: url).load(.duration)
+                let seconds = duration.seconds
+                guard seconds.isFinite, seconds > 0 else {
+                    onVideoSelectionFailed()
+                    return
+                }
+                onSelectVideo(url, Int64((seconds * 1_000).rounded()))
+            } catch {
+                onVideoSelectionFailed()
+            }
+        }
+    }
+
+    private func togglePlayback() {
+        if player.timeControlStatus == .playing {
+            player.pause()
+        } else {
+            player.currentItem?.forwardPlaybackEndTime = .invalid
+            player.play()
+        }
+        syncCurrentPosition()
+    }
+
+    private func seek(by offsetMilliseconds: Int64) {
+        let target = state.currentPositionMilliseconds + offsetMilliseconds
+        let duration = state.videoDurationMilliseconds ?? target
+        let clamped = min(max(0, target), duration)
+        player.seek(to: CMTime(seconds: Double(clamped) / 1_000, preferredTimescale: 1_000))
+        onUpdateCurrentPosition(clamped)
+    }
+
+    private func syncCurrentPosition() {
+        let seconds = player.currentTime().seconds
+        guard seconds.isFinite else { return }
+        onUpdateCurrentPosition(Int64((seconds * 1_000).rounded()))
+    }
+
+    private func playSelectedRange() {
+        guard let start = state.startMilliseconds, let end = state.endMilliseconds else { return }
+        player.seek(to: CMTime(seconds: Double(start) / 1_000, preferredTimescale: 1_000))
+        player.currentItem?.forwardPlaybackEndTime = CMTime(seconds: Double(end) / 1_000, preferredTimescale: 1_000)
+        player.play()
+        onUpdateCurrentPosition(start)
+    }
+
+    private static func format(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return String(format: "%02lld:%02lld:%02lld", seconds / 3_600, (seconds % 3_600) / 60, seconds % 60)
     }
 }
 
