@@ -346,6 +346,18 @@ Pythonはshellを介さず、設定から渡された検証済みFFmpeg／ffprob
 
 error codeは `analysis_audio_busy`、`analysis_audio_job_invalid`、`analysis_audio_source_unavailable`、`analysis_audio_source_changed`、`analysis_audio_probe_failed`、`analysis_audio_duration_invalid`、`analysis_audio_insufficient_space`、`analysis_audio_ffmpeg_failed`、`analysis_audio_invalid`、`analysis_audio_finalization_failed`、`analysis_audio_reuse_invalid`、`analysis_audio_protocol_error` とする。実ストレージ切断は未検証とし、読取不能・書込不能を安全に失敗させる自動試験と区別する。
 
+### 8.7 第11段階のVAD契約
+
+第11段階は、正式な`analysis.wav`と`analysis_audio.json`のpairを第10契約で再検証してから、Python標準ライブラリによる固定frame RMS方式で音声activityを一次検出する。追加のPython packageやFFmpeg subprocessは使用しない。この方式は人の声とBGM・SE・環境音を識別するAIではなく、候補生成前の軽量なactivity検出だけを担当する。
+
+入力は16,000 Hz、mono、PCM signed 16-bit little-endianの正式WAVに限定する。30ms単位でRMSを計算し、-45 dBFS以上をactive frameとする。連続するactive frameを整数ミリ秒の半開区間`[start_ms, end_ms)`としてメモリ内だけで表現し、連続90ms未満は除外する。最終frameが30ms未満でも処理する。発話0件は正常結果とする。
+
+この連続化はframe判定結果の表現に限る。離れた区間の結合、間隔補完、前後余白、候補の最小・最大長、分割、候補IDは第12開始Gateまで決定・実装しない。第11段階では`vad.json`その他の永続成果物を作成せず、検出区間を正式な後段入力または再利用根拠にしない。
+
+JSON Linesの`progress`は`stage: vad`と`status: running`／`completed`を順に使用する。安定error codeは`vad_busy`、`vad_job_invalid`、`vad_input_unavailable`、`vad_input_invalid`、`vad_processing_failed`、`vad_protocol_error`とする。壊れたWAV、未知metadata、pair不一致、symlink、非正式入力を推測で処理しない。発話0件をerrorへ変換しない。
+
+人工tone・noiseを使った限定比較では、Python frame RMS方式とFFmpeg `silencedetect`が全ケースに一致し、Python方式は同じ2秒入力で約1.1〜1.3ms、FFmpeg方式は約20〜22msだった。`torchaudio.functional.vad`は全activity区間を返すAPIではなく今回の責務に不適合だった。実人物、BGM、SE、残響、複数話者での検出精度は未検証であり、この条件を人物一致、音声品質、候補生成の閾値へ転用しない。実測詳細は`experiments/vad-candidates/RESULTS.md`を参照する。
+
 ### 8.5 スリープ抑止
 
 長時間の解析・保存中は意図しないidle sleepによる中断を避ける必要がある。ただし第9段階は実解析を行わないため、スリープ抑止を実装しない。具体API、開始・解除・異常終了時の最終契約、App Sandbox下の挙動は第22開始Gateで正式決定する。採用時はServiceが長時間処理開始直前に取得し、全子プロセス終了と状態検証後に正常・失敗・停止の全経路で解除するものとし、Viewの寿命には結び付けない。

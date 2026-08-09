@@ -1025,3 +1025,44 @@
 ### 判定
 
 最終再検証で新しい問題はなく、第10段階は完了状態を維持する。後続Gateの未決定・未検証事項を検証済みまたは本番方式へ変更していない。
+
+---
+
+## 2026-08-09：第11開始GateのVAD候補検証と正式決定
+
+### 対象Stage
+
+第11段階「VAD」開始Gate
+
+### 決定事項
+
+- 第11段階はPython標準ライブラリによる固定frame RMS方式を採用する。
+- 正式`analysis.wav`と`analysis_audio.json`のpairを再検証し、16 kHz、mono、PCM s16leだけを入力とする。
+- 30ms frameのRMSが-45 dBFS以上ならactiveとし、連続90ms以上だけをメモリ内の整数ミリ秒半開区間として返す。
+- 発話0件は正常結果とする。
+- 進捗は`stage: vad`の`running`、`completed`、error codeは`vad_busy`、`vad_job_invalid`、`vad_input_unavailable`、`vad_input_invalid`、`vad_processing_failed`、`vad_protocol_error`とする。
+
+### 理由
+
+- 人工WAVの3回比較でPython方式とFFmpeg `silencedetect`は全ケースに一致し、Python方式は2秒入力で約1.1〜1.3ms、FFmpeg方式は約20〜22msだった。
+- Python方式は追加依存と追加processがなく、正式WAVを逐次処理しやすい。
+- `torchaudio.functional.vad`は全activity区間を返すAPIではなく、今回の人工2区間信号も既定条件で検出しなかったため採用しない。
+
+### 検証結果
+
+- 人工WAV実験の構文検査と自己判定が成功し、無音、2区間、小音量、低レベルnoise、短音、壊れたWAV、形式違反WAVを機械的に確認した。
+- 既存Python単体テスト全28件が成功した。
+- クリーンなDerivedDataを使用したDebugビルドとSwift単体テスト全58件が成功し、失敗およびunexpected failureは0件だった。
+- 既存の復旧テストは成功したが、Apple同梱Python起動を含む当該テストに約577秒を要した。今回のVAD候補実験による製品コード変更や機能失敗ではない。
+- `git diff --check`が成功し、第11段階本体および第12段階以降の機能を実装していないことを確認した。
+
+### 未決定・未検証事項
+
+- 実人物、BGM、SE、残響、複数話者、端末差での検出精度は未検証とする。RMS方式は大きな非音声をactivityとして検出し得る。
+- `vad.json` schema、正式化、再利用、候補ID、候補結合・分割・余白・長さは第12開始Gateまで未決定とする。
+- 今回のVAD条件を人物一致閾値、音声品質の◎／○／△、第12段階の候補長へ転用しない。
+- 配布時Python配置とApp Sandbox下の挙動は第22開始Gateまで未決定とする。
+
+### Gate判定
+
+方式、入力、判定条件、正常0件、進捗、error code、後続責務を正本化したため、第11開始Gateを通過済みとする。第11本体は未実装であり、完了扱いにしない。
