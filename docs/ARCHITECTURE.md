@@ -133,11 +133,11 @@ characters/
    └─ samples/
       ├─ sample_xxxx/
       │  ├─ source.wav
-      │  ├─ embedding
+      │  ├─ embedding.npy
       │  └─ sample.json
       └─ sample_yyyy/
          ├─ source.wav
-         ├─ embedding
+         ├─ embedding.npy
          └─ sample.json
 ```
 
@@ -148,7 +148,45 @@ Embeddingは `source.wav` から再生成可能な派生データとする。
 
 人物IDとsample IDには安定した一意IDを使用する。
 
-複数sampleから人物判定用Embeddingをどのように構成するかは未決定とする。平均、最大値、centroid、外れ値除去、重み付け等の方式を推測で採用しない。第8Aまたは第8B開始前までに技術検証結果をもとに正式決定する。
+各sampleのEmbeddingは192要素のfloat32配列を `.npy` 形式で保存し、読込み時はpickleを禁止する。全要素が有限値であること、shapeが `(192,)` であること、L2 normが許容誤差内で1であること、`sample.json` が記録するモデルID・revision・元 `source.wav` のSHA-256と一致することを検証する。
+
+人物判定用Embeddingは、人物に属する全sampleの検証済みL2正規化Embeddingを算術平均し、その平均をL2正規化したcentroidとする。1 sampleにも同じ規則を適用する。centroidは保存せず、sample構成変更後または利用時に再計算する。平均のnormが0または非有限値なら人物データを無効として推測復旧しない。外れ値除去、重み付け、人物一致閾値は採用せず、第15開始Gateの人物判定検証へ残す。
+
+### 6.1 第8A人物・sample JSON契約
+
+`character.json` と `sample.json` はUTF-8 JSON、`schema_version: 1` とする。未知schema、未知の必須field、壊れたJSONを推測で受理しない。Pythonが生成・検証・正式化を所有し、Swiftは正式化済みデータを読込み表示する。Swiftはこれらを直接更新しない。
+
+人物IDは `char_`、sample IDは `sample_` に小文字のcanonical UUID文字列を続ける。一度正式化したIDを変更・再利用しない。
+
+`character.json` の必須fieldは次のとおりとする。
+
+- `schema_version`: 整数 `1`
+- `character_id`: フォルダ名と一致する安定ID
+- `display_name`: 前後空白除去後に空でない人物名
+- `sample_ids`: 1件以上の重複しないsample ID配列。各sampleフォルダと相互一致する
+
+`sample.json` の必須fieldは次のとおりとする。
+
+- `schema_version`: 整数 `1`
+- `sample_id`: sampleフォルダ名と一致する安定ID
+- `character_id`: 親人物IDと一致する参照
+- `source_interval`: `start_ms`、`end_ms`。ともに整数で `0 <= start_ms < end_ms`
+- `source_wav`: 固定相対名 `source.wav`、`sample_rate_hz: 16000`、`channels: 1`、`sample_format: "pcm_s16le"`、整数 `duration_ms`、小文字hexの `sha256`
+- `embedding`: 固定相対名 `embedding.npy`、`model_id: "speechbrain/spkrec-ecapa-voxceleb"`、固定revision、`dimension: 192`、`dtype: "float32"`、`normalization: "l2"`、元WAVと同じ `source_wav_sha256`
+
+元MP4の絶対パスは人物資産へ永続化しない。Embedding再生成は、正式 `source.wav` を入力し、`sample.json` と同じモデルID・revision・形式で一時ファイルへ生成・検証後、`embedding.npy`だけを正式化する。`source.wav` は削除・置換しない。
+
+### 6.2 人物登録音声とAI実行契約
+
+`source.wav` はFFmpegをshellなし・引数配列で起動し、`-nostdin`、既存出力を上書きしない指定、16kHz、モノラル、PCM signed 16-bit little-endianでpartial領域へ生成する。終了コード0だけで成功扱いせず、通常ファイル、非symlink、非空、WAV header、sample rate、channel数、sample形式、区間長を再検証する。
+
+初期版の登録区間は3,000ms以上30,000ms以下とする。全sampleが0の音声を `registration_audio_silent`、RMSが-60 dBFS以下またはpeakが-40 dBFS以下の音声を `registration_audio_too_quiet` として拒否する。この値は登録入力の最低安全条件であり、人物一致判定や音声品質表示のAI閾値へ転用しない。
+
+安定error codeは `registration_invalid_request`、`registration_source_unavailable`、`registration_invalid_interval`、`registration_ffmpeg_launch_failed`、`registration_ffmpeg_failed`、`registration_wav_missing`、`registration_wav_invalid_format`、`registration_audio_too_short`、`registration_audio_too_long`、`registration_audio_silent`、`registration_audio_too_quiet`、`registration_model_unavailable`、`registration_embedding_failed`、`registration_embedding_invalid`、`registration_metadata_write_failed`、`registration_finalization_failed`、`registration_protocol_error` とする。未知codeを成功へ読み替えない。
+
+第8A／第8Bの開発時候補はSpeechBrain 1.0.3と `speechbrain/spkrec-ecapa-voxceleb` revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` とする。モデルとPython環境の絶対パスはDebug設定から注入し、存在・通常ファイルまたは所定ディレクトリ・非symlink境界・読取り可能性を起動前に検証する。実行中にモデルをダウンロードしない。完成版のPython・AIモデル配置／同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
+
+人工合成音声による限定検証では、CPU上で192次元有限値Embeddingを再現可能に生成し、L2正規化centroidを構成できた。ただし実人物音声、雑音、複数話者、方言、端末差を使った精度検証ではないため、人物一致閾値は第15開始Gateまで未決定とする。実測詳細は `experiments/speaker-embedding/RESULTS.md` を参照する。
 
 ## 7. 人物データのトランザクション
 
@@ -156,18 +194,22 @@ Embeddingは `source.wav` から再生成可能な派生データとする。
 
 完成前の人物を正式人物フォルダとして扱わない。
 
+固定人物データルートはmacOS Application Support配下の `local.YoiSceneKirinuKu/characters` とする。Swiftがルートを解決し、Pythonへ絶対パスとして渡す。Pythonは標準化後のパスが固定ルート内にあり、親から対象までsymlinkでないことを検証する。
+
 例:
 
 ```text
-char_xxxxx.partial
+characters/.partial/char_xxxxx
 ```
 
-以下がすべて成功してから正式化する。
+一時領域は固定ルート直下の `.partial` のみに置き、正式人物と同じvolume上で作る。以下がすべて成功してから、人物ディレクトリ全体を `characters/char_xxxxx` へ1回のrenameで正式化する。
 
 1. 登録音声生成
 2. 最低限の品質確認
 3. Embedding生成
 4. 必要メタデータ確定
+
+正式化前に `source.wav`、`embedding.npy`、`sample.json`、`character.json` の相互参照と内容を再読込み検証する。正式人物IDとの衝突、想定外項目、symlink、検証失敗があればrenameしない。正式化後にSwiftが再読込みと同じ検証を通過した場合だけ登録成功を表示する。起動時の人物一覧は `.partial` を無視し、正式人物として扱わない。
 
 既存人物へサンプル追加する場合も、新規サンプルだけを一時状態で生成する。失敗しても既存人物データへ影響させない。
 
@@ -175,7 +217,7 @@ char_xxxxx.partial
 
 既存人物へsampleを追加する場合は、新sampleだけを一時領域で生成・検証する。`source.wav`、Embedding、メタデータがすべて正式化可能になってから人物データへ関連付ける。
 
-新規人物と既存人物へのsample追加について、正式化の原子性、失敗復旧、品質検証条件は未決定とする。第8A／第8B開始前までに正式決定する。
+新規人物の正式化、失敗時の不変条件、品質検証条件は本節の契約とする。既存人物へのsample追加では既存 `character.json` 更新を伴うため、その原子性とクラッシュ復旧を第8B開始Gateで追加決定する。
 
 ### 人物削除
 

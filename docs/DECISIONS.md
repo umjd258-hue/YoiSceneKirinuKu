@@ -518,3 +518,51 @@
 ### 判定
 
 自動検証と静的監査の範囲で第7B段階は完了状態を維持している。実メディア確認と後続Gateの未決定事項を推測で完了扱いにしていない。
+
+---
+
+## 2026-08-09：第8A開始Gate技術検証と契約決定
+
+### 対象Stage
+
+第8A段階「新規人物登録本処理」開始Gate
+
+### 確認済み事項
+
+- SpeechBrain 1.0.3と `speechbrain/spkrec-ecapa-voxceleb` revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` を候補として、人工合成音声によるCPU推論を実施した。
+- 16kHz・モノラル音声から192次元float32 Embeddingを生成でき、同一入力の再実行差が0であることを確認した。
+- L2正規化sample Embeddingの算術平均を再L2正規化するcentroidを機械的に構成できた。
+- 限定人工音声では、3秒未満より3秒以上の入力でfull音声とのEmbedding類似が安定する傾向を確認した。
+- 無音でもモデルが有限Embeddingを返すため、Embedding生成前の独立した無音・音量検査が必要であることを確認した。
+- 10秒、30秒、60秒の人工音声で有限Embeddingを生成でき、登録入力上限を設けても技術成立性を損なわないことを確認した。
+
+### 決定事項
+
+- `character.json`、`sample.json` はschema version 1とし、Pythonが生成・検証・正式化を所有する。Swiftは正式データを読込む。
+- 人物IDとsample IDは接頭辞付きcanonical UUIDとし、フォルダ名・JSON参照を一致させる。
+- `source.wav` は16kHz、mono、PCM signed 16-bit little-endianの重要資産とする。
+- sample Embeddingは192次元float32のL2正規化配列を `embedding.npy` に保存し、pickleを禁止する。元WAV SHA-256とモデルID・revisionを `sample.json` へ記録する。
+- 人物判定用内部表現は、全sampleのL2正規化Embeddingを算術平均し、再L2正規化したcentroidとする。centroidは保存せず再計算する。
+- 登録区間は3,000ms以上30,000ms以下とする。全sampleが0、RMS -60dBFS以下、peak -40dBFS以下を安定error codeで拒否する。
+- 人物データルートはApplication Support配下の `local.YoiSceneKirinuKu/characters` とし、一時人物は同一volumeの `characters/.partial/` 内だけに作る。
+- 全成果物と相互参照の再検証後、人物ディレクトリ全体の1回のrenameで正式化し、Swift再読込み検証後だけ成功表示する。
+- 第8A／第8Bの開発時はモデルとPython環境の絶対パスをDebug設定から注入し、実行中にダウンロードしない。
+
+### 理由
+
+- `source.wav` とモデルrevisionを結び付けることでEmbeddingを決定論的に再生成し、派生データ破損から復旧できる。
+- 個別sampleを保持してcentroidを再計算する方式は、sample追加時に正本Embeddingを失わず、staleな集約ファイルを避けられる。
+- partial人物全体を同一volumeで正式化することで、完成前データを人物一覧へ露出しない。
+- 人工音声の実測値は最低入力検査と内部データ契約の判断には使えるが、実人物の一致精度やUI表示閾値の根拠には不足する。
+
+### 未決定事項
+
+- 人物一致閾値、人物不明判定、◎／○／△変換は第15開始Gateまで未決定とする。
+- 実人物、雑音、残響、複数話者、マイク差を含む精度評価は未検証とする。
+- 外れ値sampleの除外や重み付けは採用せず、必要性が確認された場合に別Gateで判断する。
+- 完成版Python、AIモデル、依存ライブラリの配置・同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
+- 既存人物へsampleを追加する際の `character.json` 更新原子性とクラッシュ復旧は第8B開始Gateで決定する。
+
+### Gate判定
+
+`ARCHITECTURE.md`へ第8Aに必要な人物・sample schema、WAV、Embedding、最低品質、error code、開発時実行、固定ルート、partial正式化契約を反映したため、第8A開始Gateを通過済みとする。第8A本体は未実装であり、完了扱いにしない。

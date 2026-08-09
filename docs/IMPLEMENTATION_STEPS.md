@@ -449,13 +449,15 @@ MP4を選択し、本解析へ進めるかを軽量に確認する実動作をHo
 
 ## 開始Gate
 
-- `character.json` と `sample.json` のschema version、必須項目、ID参照、所有者を正式決定する。
-- `source.wav` の16kHz・モノラル生成、partial、検証、正式化契約を正式決定する。
-- Embeddingの保存形式と `source.wav` からの再生成契約を正式決定する。
-- 複数sampleから人物判定用Embeddingを構成する方式を技術検証結果から正式決定する。平均等を推測で採用しない。
-- 登録音声の長さ、無音、音量、破損等の最低限品質条件とerror codeを正式決定する。
-- Python→FFmpeg、AIモデル配置、人物登録に必要なPython実行方式を正式決定する。
-- 人物データの固定ルートと一時領域を正式決定する。
+- `ARCHITECTURE.md` 第6.1節で `character.json` と `sample.json` のschema version、必須項目、ID参照、所有者が正式決定済みである。
+- `ARCHITECTURE.md` 第6.2節および第7節で `source.wav` の16kHz・モノラル生成、partial、検証、正式化契約が正式決定済みである。
+- `ARCHITECTURE.md` 第6節でEmbeddingの保存形式と `source.wav` からの再生成契約が正式決定済みである。
+- 技術検証結果に基づき、複数sampleの人物判定用EmbeddingをL2正規化平均centroidとして構成する方式が正式決定済みである。人物一致閾値は第15開始Gateへ残す。
+- 登録音声の長さ、無音、音量、破損等の最低限品質条件とerror codeが `ARCHITECTURE.md` 第6.2節で正式決定済みである。
+- Python→FFmpeg、開発時AIモデル配置、人物登録に必要なPython実行方式が正式決定済みである。完成版同梱方式は第22開始Gateへ残す。
+- 人物データの固定ルートと一時領域が `ARCHITECTURE.md` 第7節で正式決定済みである。
+
+2026-08-09の技術検証と正本反映により、第8A開始Gateは通過済みとする。これは第8A本体の実装または完了を意味しない。
 
 ## 今回の目的
 
