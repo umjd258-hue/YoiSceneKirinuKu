@@ -417,7 +417,10 @@ struct ResultsView: View {
 
 struct CharactersView: View {
     let registeredCharacters: [CharacterSummary]
+    let managementState: CharacterManagementState
     let registration: NewCharacterRegistrationState
+    let sampleAddition: ExistingCharacterSampleAdditionState
+    let onSelectManagedCharacter: (UUID) -> Void
     let onBeginRegistration: () -> Bool
     let onUpdateName: (String) -> Void
     let onSelectVideo: (URL, Int64) -> Void
@@ -427,6 +430,15 @@ struct CharactersView: View {
     let onSetRangeEnd: () -> Void
     let onRequestRegistration: () -> Bool
     let onCancelRegistration: () -> Void
+    let onBeginSampleAddition: () -> Bool
+    let onSelectSampleVideo: (URL, Int64) -> Void
+    let onSampleVideoSelectionFailed: () -> Void
+    let onUpdateSampleCurrentPosition: (Int64) -> Void
+    let onSetSampleRangeStart: () -> Void
+    let onSetSampleRangeEnd: () -> Void
+    let onRequestSampleAddition: () -> Bool
+    let onRetrySampleAddition: () -> Bool
+    let onCancelSampleAddition: () -> Void
     let onReturnHome: () -> Bool
 
     var body: some View {
@@ -437,8 +449,27 @@ struct CharactersView: View {
             if registeredCharacters.isEmpty {
                 ContentUnavailableView("登録人物がいません", systemImage: "person.crop.circle.badge.plus")
             } else {
-                List(registeredCharacters) { character in
-                    Text(character.name)
+                HSplitView {
+                    List(
+                        registeredCharacters,
+                        selection: Binding(
+                            get: { managementState.selectedCharacterID },
+                            set: { if let id = $0 { onSelectManagedCharacter(id) } }
+                        )
+                    ) { character in
+                        let count = managementState.samples(for: character.id).count
+                        HStack {
+                            Text(character.name)
+                            Spacer()
+                            Text("\(count)件")
+                                .foregroundStyle(.secondary)
+                        }
+                        .tag(character.id)
+                    }
+                    .frame(minWidth: 240)
+
+                    selectedCharacterDetail
+                        .frame(minWidth: 360)
                 }
                 .frame(minHeight: 260)
             }
@@ -469,6 +500,229 @@ struct CharactersView: View {
                 onCancel: onCancelRegistration
             )
         }
+        .sheet(
+            isPresented: Binding(
+                get: { sampleAddition.isPresented },
+                set: { if !$0 { onCancelSampleAddition() } }
+            )
+        ) {
+            ExistingCharacterSampleAdditionView(
+                state: sampleAddition,
+                onSelectVideo: onSelectSampleVideo,
+                onVideoSelectionFailed: onSampleVideoSelectionFailed,
+                onUpdateCurrentPosition: onUpdateSampleCurrentPosition,
+                onSetRangeStart: onSetSampleRangeStart,
+                onSetRangeEnd: onSetSampleRangeEnd,
+                onRequestAddition: onRequestSampleAddition,
+                onRetry: onRetrySampleAddition,
+                onCancel: onCancelSampleAddition
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var selectedCharacterDetail: some View {
+        if let characterID = managementState.selectedCharacterID,
+           let character = registeredCharacters.first(where: { $0.id == characterID }) {
+            let samples = managementState.samples(for: characterID)
+            VStack(alignment: .leading, spacing: 14) {
+                Text(character.name)
+                    .font(.title2.bold())
+                Text("登録音声")
+                    .font(.headline)
+
+                if samples.isEmpty {
+                    Text("登録音声はありません。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(samples) { sample in
+                        HStack {
+                            Button("▶") {}
+                                .disabled(true)
+                                .help("保存済みsource.wavとの本接続は後続段階で実装します。")
+                            Text(sample.sourceFileName)
+                            Spacer()
+                            Text(Self.formatDuration(sample.durationMilliseconds))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Button("＋ 音声を追加") { onBeginSampleAddition() }
+                Text("合計 \(Self.formatDuration(samples.reduce(0) { $0 + $1.durationMilliseconds }))")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(16)
+        } else {
+            ContentUnavailableView("人物を選んでください", systemImage: "person.crop.circle")
+        }
+    }
+
+    private static func formatDuration(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return "\(seconds)秒"
+    }
+}
+
+private struct ExistingCharacterSampleAdditionView: View {
+    let state: ExistingCharacterSampleAdditionState
+    let onSelectVideo: (URL, Int64) -> Void
+    let onVideoSelectionFailed: () -> Void
+    let onUpdateCurrentPosition: (Int64) -> Void
+    let onSetRangeStart: () -> Void
+    let onSetRangeEnd: () -> Void
+    let onRequestAddition: () -> Bool
+    let onRetry: () -> Bool
+    let onCancel: () -> Void
+    @State private var isVideoImporterPresented = false
+    @State private var player = AVPlayer()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("登録音声を追加")
+                .font(.title.bold())
+            Text("追加先：\(state.targetCharacterName ?? "未選択")")
+                .font(.headline)
+
+            switch state.phase {
+            case .editing:
+                editor
+            case .additionRequested:
+                ProgressView("音声追加の完了を待っています…")
+                Text("追加処理が正式に完了するまで登録音声件数は変わりません。")
+                    .foregroundStyle(.secondary)
+            case .succeeded:
+                ContentUnavailableView("登録音声の追加が完了しました", systemImage: "checkmark.circle")
+            case .failed(let message):
+                ContentUnavailableView("登録音声を追加できませんでした", systemImage: "exclamationmark.triangle", description: Text(message))
+                Button("再試行") { onRetry() }
+            }
+
+            HStack {
+                Button(state.phase == .editing ? "キャンセル" : "閉じる") { onCancel() }
+                Spacer()
+                if state.phase == .editing {
+                    Button("この音声を追加") { onRequestAddition() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!state.canRequestAddition)
+                }
+            }
+        }
+        .frame(minWidth: 680, minHeight: 620)
+        .padding(24)
+        .fileImporter(
+            isPresented: $isVideoImporterPresented,
+            allowedContentTypes: [.mpeg4Movie],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else {
+                onVideoSelectionFailed()
+                return
+            }
+            loadVideo(url)
+        }
+        .onChange(of: state.videoURL) { _, url in
+            player.replaceCurrentItem(with: url.map(AVPlayerItem.init(url:)))
+        }
+        .onDisappear { player.pause() }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Button("MP4を選ぶ") { isVideoImporterPresented = true }
+                Text(state.videoFileName ?? "未選択")
+                    .foregroundStyle(.secondary)
+            }
+            if let message = state.videoErrorMessage {
+                Text(message)
+                    .foregroundStyle(.red)
+            }
+            VideoPlayer(player: player)
+                .frame(height: 280)
+                .background(Color.black)
+            HStack {
+                Button("−5秒") { seek(by: -5_000) }
+                    .disabled(state.videoURL == nil)
+                Button(player.timeControlStatus == .playing ? "一時停止" : "再生") { togglePlayback() }
+                    .disabled(state.videoURL == nil)
+                Button("＋5秒") { seek(by: 5_000) }
+                    .disabled(state.videoURL == nil)
+                Spacer()
+                Text("現在位置 \(Self.format(state.currentPositionMilliseconds))")
+                    .monospacedDigit()
+            }
+            LabeledContent("開始", value: state.startMilliseconds.map(Self.format) ?? "未設定")
+            Button("現在位置を開始に") {
+                syncCurrentPosition()
+                onSetRangeStart()
+            }
+            .disabled(state.videoURL == nil)
+            LabeledContent("終了", value: state.endMilliseconds.map(Self.format) ?? "未設定")
+            Button("現在位置を終了に") {
+                syncCurrentPosition()
+                onSetRangeEnd()
+            }
+            .disabled(state.videoURL == nil)
+            Button("選択範囲を再生") { playSelectedRange() }
+                .disabled(!state.hasValidRange)
+            Text("できるだけ、本人だけの声がはっきり聞こえる場面を選んでください。")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadVideo(_ url: URL) {
+        Task { @MainActor in
+            do {
+                let duration = try await AVURLAsset(url: url).load(.duration)
+                let seconds = duration.seconds
+                guard seconds.isFinite, seconds > 0 else {
+                    onVideoSelectionFailed()
+                    return
+                }
+                onSelectVideo(url, Int64((seconds * 1_000).rounded()))
+            } catch {
+                onVideoSelectionFailed()
+            }
+        }
+    }
+
+    private func togglePlayback() {
+        if player.timeControlStatus == .playing {
+            player.pause()
+        } else {
+            player.currentItem?.forwardPlaybackEndTime = .invalid
+            player.play()
+        }
+        syncCurrentPosition()
+    }
+
+    private func seek(by offsetMilliseconds: Int64) {
+        let target = state.currentPositionMilliseconds + offsetMilliseconds
+        let duration = state.videoDurationMilliseconds ?? target
+        let clamped = min(max(0, target), duration)
+        player.seek(to: CMTime(seconds: Double(clamped) / 1_000, preferredTimescale: 1_000))
+        onUpdateCurrentPosition(clamped)
+    }
+
+    private func syncCurrentPosition() {
+        let seconds = player.currentTime().seconds
+        guard seconds.isFinite else { return }
+        onUpdateCurrentPosition(Int64((seconds * 1_000).rounded()))
+    }
+
+    private func playSelectedRange() {
+        guard let start = state.startMilliseconds, let end = state.endMilliseconds else { return }
+        player.seek(to: CMTime(seconds: Double(start) / 1_000, preferredTimescale: 1_000))
+        player.currentItem?.forwardPlaybackEndTime = CMTime(seconds: Double(end) / 1_000, preferredTimescale: 1_000)
+        player.play()
+        onUpdateCurrentPosition(start)
+    }
+
+    private static func format(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return String(format: "%02lld:%02lld:%02lld", seconds / 3_600, (seconds % 3_600) / 60, seconds % 60)
     }
 }
 

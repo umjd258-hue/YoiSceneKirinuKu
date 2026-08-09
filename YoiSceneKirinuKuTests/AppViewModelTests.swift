@@ -520,6 +520,103 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertNotNil(subject.newCharacterRegistration.videoErrorMessage)
     }
 
+    func testExistingSampleAdditionTargetsExplicitlySelectedCharacter() throws {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        let ran = try XCTUnwrap(subject.homeState.registeredCharacters.first(where: { $0.name == "蘭" }))
+
+        subject.selectManagedCharacter(ran.id)
+        XCTAssertEqual(subject.characterManagementState.selectedCharacterID, ran.id)
+        XCTAssertTrue(subject.beginExistingCharacterSampleAddition())
+        XCTAssertEqual(subject.existingCharacterSampleAddition.targetCharacterID, ran.id)
+        XCTAssertEqual(subject.existingCharacterSampleAddition.targetCharacterName, "蘭")
+
+        let conan = try XCTUnwrap(subject.homeState.registeredCharacters.first(where: { $0.name == "コナン" }))
+        subject.selectManagedCharacter(conan.id)
+        XCTAssertEqual(subject.characterManagementState.selectedCharacterID, ran.id)
+        XCTAssertEqual(subject.existingCharacterSampleAddition.targetCharacterID, ran.id)
+    }
+
+    func testExistingSampleAdditionRequiresVideoAndValidRange() {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginExistingCharacterSampleAddition())
+        XCTAssertFalse(subject.requestExistingCharacterSampleAddition())
+
+        subject.selectExistingCharacterSampleVideo(
+            URL(fileURLWithPath: "/tmp/addition.mp4"),
+            durationMilliseconds: 20_000
+        )
+        subject.updateExistingCharacterSampleCurrentPosition(12_000)
+        subject.setExistingCharacterSampleRangeStart()
+        subject.updateExistingCharacterSampleCurrentPosition(4_000)
+        subject.setExistingCharacterSampleRangeEnd()
+        XCTAssertFalse(subject.existingCharacterSampleAddition.canRequestAddition)
+
+        subject.updateExistingCharacterSampleCurrentPosition(18_000)
+        subject.setExistingCharacterSampleRangeEnd()
+        XCTAssertTrue(subject.existingCharacterSampleAddition.canRequestAddition)
+        XCTAssertTrue(subject.requestExistingCharacterSampleAddition())
+        XCTAssertEqual(subject.existingCharacterSampleAddition.phase, .additionRequested)
+    }
+
+    func testExistingSampleSuccessAndFailureDoNotChangeExistingData() throws {
+        let successSubject = AppViewModel()
+        XCTAssertTrue(successSubject.navigateToCharacters())
+        let targetID = try XCTUnwrap(successSubject.characterManagementState.selectedCharacterID)
+        let originalCharacters = successSubject.homeState.registeredCharacters
+        let originalSamples = successSubject.characterManagementState.samples(for: targetID)
+        prepareValidExistingSampleAddition(successSubject)
+        XCTAssertTrue(successSubject.requestExistingCharacterSampleAddition())
+        XCTAssertTrue(successSubject.confirmExistingCharacterSampleAdditionSucceeded())
+        XCTAssertEqual(successSubject.existingCharacterSampleAddition.phase, .succeeded)
+        XCTAssertEqual(successSubject.homeState.registeredCharacters, originalCharacters)
+        XCTAssertEqual(successSubject.characterManagementState.samples(for: targetID), originalSamples)
+
+        let failureSubject = AppViewModel()
+        XCTAssertTrue(failureSubject.navigateToCharacters())
+        let failureTargetID = try XCTUnwrap(failureSubject.characterManagementState.selectedCharacterID)
+        let failureCharacters = failureSubject.homeState.registeredCharacters
+        let failureSamples = failureSubject.characterManagementState.samples(for: failureTargetID)
+        prepareValidExistingSampleAddition(failureSubject)
+        XCTAssertTrue(failureSubject.requestExistingCharacterSampleAddition())
+        failureSubject.confirmExistingCharacterSampleAdditionFailed(message: "Mock failure")
+        XCTAssertEqual(failureSubject.existingCharacterSampleAddition.phase, .failed(message: "Mock failure"))
+        XCTAssertEqual(failureSubject.homeState.registeredCharacters, failureCharacters)
+        XCTAssertEqual(failureSubject.characterManagementState.samples(for: failureTargetID), failureSamples)
+    }
+
+    func testExistingSampleFailureCanRetryAndCancelWithoutChangingTargetData() throws {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        let targetID = try XCTUnwrap(subject.characterManagementState.selectedCharacterID)
+        let originalSamples = subject.characterManagementState.samples(for: targetID)
+        prepareValidExistingSampleAddition(subject)
+        XCTAssertTrue(subject.requestExistingCharacterSampleAddition())
+        subject.confirmExistingCharacterSampleAdditionFailed(message: "再試行できます。")
+
+        XCTAssertTrue(subject.retryExistingCharacterSampleAddition())
+        XCTAssertEqual(subject.existingCharacterSampleAddition.phase, .editing)
+        XCTAssertEqual(subject.existingCharacterSampleAddition.targetCharacterID, targetID)
+        XCTAssertTrue(subject.existingCharacterSampleAddition.canRequestAddition)
+
+        subject.cancelExistingCharacterSampleAddition()
+        XCTAssertEqual(subject.existingCharacterSampleAddition, ExistingCharacterSampleAdditionState())
+        XCTAssertEqual(subject.characterManagementState.samples(for: targetID), originalSamples)
+    }
+
+    private func prepareValidExistingSampleAddition(_ subject: AppViewModel) {
+        XCTAssertTrue(subject.beginExistingCharacterSampleAddition())
+        subject.selectExistingCharacterSampleVideo(
+            URL(fileURLWithPath: "/tmp/addition.mp4"),
+            durationMilliseconds: 20_000
+        )
+        subject.updateExistingCharacterSampleCurrentPosition(2_000)
+        subject.setExistingCharacterSampleRangeStart()
+        subject.updateExistingCharacterSampleCurrentPosition(9_000)
+        subject.setExistingCharacterSampleRangeEnd()
+    }
+
     func testSuccessfulPreflightUpdatesOnlyVideoState() async {
         let result = PreflightResult(
             fileName: "episode01.mp4",

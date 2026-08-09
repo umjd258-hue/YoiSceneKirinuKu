@@ -36,7 +36,10 @@ struct RootView: View {
         case .characters:
             CharactersView(
                 registeredCharacters: appViewModel.homeState.registeredCharacters,
+                managementState: appViewModel.characterManagementState,
                 registration: appViewModel.newCharacterRegistration,
+                sampleAddition: appViewModel.existingCharacterSampleAddition,
+                onSelectManagedCharacter: appViewModel.selectManagedCharacter,
                 onBeginRegistration: appViewModel.beginNewCharacterRegistration,
                 onUpdateName: appViewModel.updateNewCharacterName,
                 onSelectVideo: appViewModel.selectNewCharacterVideo,
@@ -46,6 +49,15 @@ struct RootView: View {
                 onSetRangeEnd: appViewModel.setNewCharacterRangeEnd,
                 onRequestRegistration: appViewModel.requestNewCharacterRegistration,
                 onCancelRegistration: appViewModel.cancelNewCharacterRegistration,
+                onBeginSampleAddition: appViewModel.beginExistingCharacterSampleAddition,
+                onSelectSampleVideo: appViewModel.selectExistingCharacterSampleVideo,
+                onSampleVideoSelectionFailed: appViewModel.existingCharacterSampleVideoSelectionFailed,
+                onUpdateSampleCurrentPosition: appViewModel.updateExistingCharacterSampleCurrentPosition,
+                onSetSampleRangeStart: appViewModel.setExistingCharacterSampleRangeStart,
+                onSetSampleRangeEnd: appViewModel.setExistingCharacterSampleRangeEnd,
+                onRequestSampleAddition: appViewModel.requestExistingCharacterSampleAddition,
+                onRetrySampleAddition: appViewModel.retryExistingCharacterSampleAddition,
+                onCancelSampleAddition: appViewModel.cancelExistingCharacterSampleAddition,
                 onReturnHome: appViewModel.returnHome
             )
         }

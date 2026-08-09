@@ -279,6 +279,80 @@ struct NewCharacterRegistrationState: Equatable {
     }
 }
 
+struct RegisteredAudioSampleSummary: Identifiable, Equatable {
+    let id: UUID
+    let sourceFileName: String
+    let durationMilliseconds: Int64
+}
+
+struct CharacterManagementState: Equatable {
+    var selectedCharacterID: UUID?
+    var samplesByCharacterID: [UUID: [RegisteredAudioSampleSummary]]
+
+    static let initial: CharacterManagementState = {
+        let conanID = UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!
+        let ranID = UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!
+        let haibaraID = UUID(uuidString: "a0386bc8-7d73-47de-ae6f-7a729255c194")!
+        return CharacterManagementState(
+            selectedCharacterID: conanID,
+            samplesByCharacterID: [
+                conanID: [
+                    RegisteredAudioSampleSummary(id: UUID(uuidString: "2514fffd-245d-40f2-b215-77949dcc74ae")!, sourceFileName: "episode01.mp4", durationMilliseconds: 7_000),
+                    RegisteredAudioSampleSummary(id: UUID(uuidString: "ab0b7819-e9c6-4208-a583-9eed4a6db4b9")!, sourceFileName: "episode03.mp4", durationMilliseconds: 8_000),
+                ],
+                ranID: [
+                    RegisteredAudioSampleSummary(id: UUID(uuidString: "984e2ee1-d0aa-4f31-a3dd-5c133c32b78d")!, sourceFileName: "episode02.mp4", durationMilliseconds: 6_000),
+                ],
+                haibaraID: [
+                    RegisteredAudioSampleSummary(id: UUID(uuidString: "ec0fe8dd-c9c9-4c45-85e5-8b014767297d")!, sourceFileName: "episode05.mp4", durationMilliseconds: 6_000),
+                ],
+            ]
+        )
+    }()
+
+    func samples(for characterID: UUID) -> [RegisteredAudioSampleSummary] {
+        samplesByCharacterID[characterID] ?? []
+    }
+}
+
+enum ExistingCharacterSampleAdditionPhase: Equatable {
+    case editing
+    case additionRequested
+    case succeeded
+    case failed(message: String)
+}
+
+struct ExistingCharacterSampleAdditionState: Equatable {
+    var isPresented = false
+    var targetCharacterID: UUID?
+    var targetCharacterName: String?
+    var videoURL: URL?
+    var videoDurationMilliseconds: Int64?
+    var currentPositionMilliseconds: Int64 = 0
+    var startMilliseconds: Int64?
+    var endMilliseconds: Int64?
+    var phase: ExistingCharacterSampleAdditionPhase = .editing
+    var videoErrorMessage: String?
+
+    var videoFileName: String? { videoURL?.lastPathComponent }
+
+    var hasValidRange: Bool {
+        guard let startMilliseconds,
+              let endMilliseconds,
+              let videoDurationMilliseconds else { return false }
+        return startMilliseconds >= 0
+            && startMilliseconds < endMilliseconds
+            && endMilliseconds <= videoDurationMilliseconds
+    }
+
+    var canRequestAddition: Bool {
+        phase == .editing
+            && targetCharacterID != nil
+            && videoURL != nil
+            && hasValidRange
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
@@ -287,6 +361,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var analysisState: AnalysisState
     @Published private(set) var resultsState: ResultsState
     @Published private(set) var newCharacterRegistration = NewCharacterRegistrationState()
+    @Published private(set) var characterManagementState = CharacterManagementState.initial
+    @Published private(set) var existingCharacterSampleAddition = ExistingCharacterSampleAdditionState()
     private let preflightService: any PreflightServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
@@ -480,6 +556,103 @@ final class AppViewModel: ObservableObject {
 
     func cancelNewCharacterRegistration() {
         newCharacterRegistration = NewCharacterRegistrationState()
+    }
+
+    func selectManagedCharacter(_ characterID: UUID) {
+        guard route == .characters,
+              !existingCharacterSampleAddition.isPresented,
+              homeState.registeredCharacters.contains(where: { $0.id == characterID }) else { return }
+        characterManagementState.selectedCharacterID = characterID
+    }
+
+    @discardableResult
+    func beginExistingCharacterSampleAddition() -> Bool {
+        guard route == .characters,
+              !newCharacterRegistration.isPresented,
+              !existingCharacterSampleAddition.isPresented,
+              let characterID = characterManagementState.selectedCharacterID,
+              let character = homeState.registeredCharacters.first(where: { $0.id == characterID }) else { return false }
+        existingCharacterSampleAddition = ExistingCharacterSampleAdditionState(
+            isPresented: true,
+            targetCharacterID: character.id,
+            targetCharacterName: character.name
+        )
+        return true
+    }
+
+    func selectExistingCharacterSampleVideo(_ url: URL, durationMilliseconds: Int64) {
+        guard existingCharacterSampleAddition.isPresented,
+              existingCharacterSampleAddition.phase == .editing else { return }
+        guard durationMilliseconds > 0 else {
+            existingCharacterSampleAddition.videoURL = nil
+            existingCharacterSampleAddition.videoDurationMilliseconds = nil
+            existingCharacterSampleAddition.videoErrorMessage = "動画を読み込めませんでした。"
+            return
+        }
+        existingCharacterSampleAddition.videoURL = url
+        existingCharacterSampleAddition.videoDurationMilliseconds = durationMilliseconds
+        existingCharacterSampleAddition.currentPositionMilliseconds = 0
+        existingCharacterSampleAddition.startMilliseconds = nil
+        existingCharacterSampleAddition.endMilliseconds = nil
+        existingCharacterSampleAddition.videoErrorMessage = nil
+    }
+
+    func existingCharacterSampleVideoSelectionFailed() {
+        guard existingCharacterSampleAddition.isPresented,
+              existingCharacterSampleAddition.phase == .editing else { return }
+        existingCharacterSampleAddition.videoURL = nil
+        existingCharacterSampleAddition.videoDurationMilliseconds = nil
+        existingCharacterSampleAddition.videoErrorMessage = "動画を読み込めませんでした。"
+    }
+
+    func updateExistingCharacterSampleCurrentPosition(_ milliseconds: Int64) {
+        guard existingCharacterSampleAddition.isPresented,
+              let duration = existingCharacterSampleAddition.videoDurationMilliseconds else { return }
+        existingCharacterSampleAddition.currentPositionMilliseconds = min(max(0, milliseconds), duration)
+    }
+
+    func setExistingCharacterSampleRangeStart() {
+        guard existingCharacterSampleAddition.isPresented,
+              existingCharacterSampleAddition.phase == .editing,
+              existingCharacterSampleAddition.videoURL != nil else { return }
+        existingCharacterSampleAddition.startMilliseconds = existingCharacterSampleAddition.currentPositionMilliseconds
+    }
+
+    func setExistingCharacterSampleRangeEnd() {
+        guard existingCharacterSampleAddition.isPresented,
+              existingCharacterSampleAddition.phase == .editing,
+              existingCharacterSampleAddition.videoURL != nil else { return }
+        existingCharacterSampleAddition.endMilliseconds = existingCharacterSampleAddition.currentPositionMilliseconds
+    }
+
+    @discardableResult
+    func requestExistingCharacterSampleAddition() -> Bool {
+        guard existingCharacterSampleAddition.canRequestAddition else { return false }
+        existingCharacterSampleAddition.phase = .additionRequested
+        return true
+    }
+
+    @discardableResult
+    func confirmExistingCharacterSampleAdditionSucceeded() -> Bool {
+        guard existingCharacterSampleAddition.phase == .additionRequested else { return false }
+        existingCharacterSampleAddition.phase = .succeeded
+        return true
+    }
+
+    func confirmExistingCharacterSampleAdditionFailed(message: String) {
+        guard existingCharacterSampleAddition.phase == .additionRequested else { return }
+        existingCharacterSampleAddition.phase = .failed(message: message)
+    }
+
+    @discardableResult
+    func retryExistingCharacterSampleAddition() -> Bool {
+        guard case .failed = existingCharacterSampleAddition.phase else { return false }
+        existingCharacterSampleAddition.phase = .editing
+        return true
+    }
+
+    func cancelExistingCharacterSampleAddition() {
+        existingCharacterSampleAddition = ExistingCharacterSampleAdditionState()
     }
 
     private func apply(_ outcome: PreflightOutcome, requestID: UUID) {
