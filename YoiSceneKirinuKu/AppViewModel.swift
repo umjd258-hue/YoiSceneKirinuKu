@@ -116,12 +116,140 @@ enum AnalysisState: Equatable {
     ))
 }
 
+enum ResultQuality: Equatable, CaseIterable {
+    case excellent
+    case good
+    case needsReview
+
+    var symbol: String {
+        switch self {
+        case .excellent: "◎"
+        case .good: "○"
+        case .needsReview: "△"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .excellent: "とても良い"
+        case .good: "良い"
+        case .needsReview: "要確認"
+        }
+    }
+
+    var isInitiallySelected: Bool { self != .needsReview }
+}
+
+enum CharacterMatchDisplay: Equatable {
+    case high
+    case medium
+    case unknown
+
+    var title: String {
+        switch self {
+        case .high: "高い"
+        case .medium: "中程度"
+        case .unknown: "人物不明"
+        }
+    }
+}
+
+struct ResultCandidate: Identifiable, Equatable {
+    let id: UUID
+    let startMilliseconds: Int64
+    let durationMilliseconds: Int64
+    let quality: ResultQuality
+    let characterMatch: CharacterMatchDisplay
+    let qualityReason: String?
+
+    var endMilliseconds: Int64 { startMilliseconds + durationMilliseconds }
+}
+
+enum ResultGroupID: Hashable {
+    case character(UUID)
+    case unknown
+}
+
+struct ResultGroup: Identifiable, Equatable {
+    let id: ResultGroupID
+    let title: String
+    let candidates: [ResultCandidate]
+
+    var isUnknown: Bool { id == .unknown }
+}
+
+struct ResultSelectionState: Equatable {
+    var selectedCandidateIDs: Set<UUID>
+}
+
+struct ResultsState: Equatable {
+    var groups: [ResultGroup]
+    var selection: ResultSelectionState
+    var focusedCandidateID: UUID?
+    var expandedGroupIDs: Set<ResultGroupID>
+
+    static let empty = ResultsState(
+        groups: [],
+        selection: ResultSelectionState(selectedCandidateIDs: []),
+        focusedCandidateID: nil,
+        expandedGroupIDs: []
+    )
+
+    static let initial: ResultsState = {
+        let conanID = UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!
+        let ranID = UUID(uuidString: "ceae23e4-f6fb-4aa8-860a-2c4a22fe1d07")!
+        let excellentID = UUID(uuidString: "04606659-a277-48d8-b89d-5992da0d40cc")!
+        let goodID = UUID(uuidString: "1e97d70e-2497-44d0-b558-4dd865792d52")!
+        let reviewID = UUID(uuidString: "f1c9b457-0f28-4b91-87cb-065503be87b8")!
+        let ranGoodID = UUID(uuidString: "5b8e49d3-6e7e-49a0-99ba-74162236bd29")!
+        let unknownExcellentID = UUID(uuidString: "17a9f28a-8505-40a0-9108-fd61ec8cda95")!
+        let unknownReviewID = UUID(uuidString: "cdf88239-d285-4025-ac22-8479dbc9e83c")!
+
+        let groups = [
+            ResultGroup(id: .character(conanID), title: "コナン", candidates: [
+                ResultCandidate(id: excellentID, startMilliseconds: 192_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .high, qualityReason: nil),
+                ResultCandidate(id: goodID, startMilliseconds: 521_000, durationMilliseconds: 6_000, quality: .good, characterMatch: .high, qualityReason: "背景音がやや強い。"),
+                ResultCandidate(id: reviewID, startMilliseconds: 680_000, durationMilliseconds: 3_000, quality: .needsReview, characterMatch: .medium, qualityReason: "声が小さい。"),
+            ]),
+            ResultGroup(id: .character(ranID), title: "蘭", candidates: [
+                ResultCandidate(id: ranGoodID, startMilliseconds: 744_000, durationMilliseconds: 5_000, quality: .good, characterMatch: .medium, qualityReason: nil),
+            ]),
+            ResultGroup(id: .unknown, title: "人物不明", candidates: [
+                ResultCandidate(id: unknownExcellentID, startMilliseconds: 820_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .unknown, qualityReason: nil),
+                ResultCandidate(id: unknownReviewID, startMilliseconds: 900_000, durationMilliseconds: 2_000, quality: .needsReview, characterMatch: .unknown, qualityReason: "短い発話です。"),
+            ]),
+        ]
+        let selected = Set(groups.flatMap(\.candidates).filter { candidate in
+            candidate.quality.isInitiallySelected && candidate.characterMatch != .unknown
+        }.map(\.id))
+        return ResultsState(
+            groups: groups,
+            selection: ResultSelectionState(selectedCandidateIDs: selected),
+            focusedCandidateID: groups.first?.candidates.first?.id,
+            expandedGroupIDs: [.character(conanID), .character(ranID)]
+        )
+    }()
+
+    var candidateCount: Int { groups.reduce(0) { $0 + $1.candidates.count } }
+    var selectedCandidateIDs: Set<UUID> { selection.selectedCandidateIDs }
+    var selectedCount: Int { selection.selectedCandidateIDs.count }
+
+    var focusedCandidate: ResultCandidate? {
+        groups.lazy.flatMap(\.candidates).first { $0.id == focusedCandidateID }
+    }
+
+    var focusedGroupTitle: String? {
+        groups.first { group in group.candidates.contains { $0.id == focusedCandidateID } }?.title
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
     @Published private(set) var homeState: HomeState
     @Published private(set) var draftCharacterIDs: Set<UUID>?
     @Published private(set) var analysisState: AnalysisState
+    @Published private(set) var resultsState: ResultsState
     private let preflightService: any PreflightServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
@@ -129,10 +257,12 @@ final class AppViewModel: ObservableObject {
     init(
         homeState: HomeState = .initial,
         analysisState: AnalysisState = .initial,
+        resultsState: ResultsState = .initial,
         preflightService: any PreflightServicing = PreflightService()
     ) {
         self.homeState = homeState
         self.analysisState = analysisState
+        self.resultsState = resultsState
         self.preflightService = preflightService
     }
 
@@ -210,6 +340,33 @@ final class AppViewModel: ObservableObject {
               let resumeProgress else { return false }
         analysisState = .running(progress: resumeProgress)
         return true
+    }
+
+    func toggleResultSelection(_ candidateID: UUID) {
+        guard resultsState.groups.contains(where: { group in
+            group.candidates.contains(where: { $0.id == candidateID })
+        }) else { return }
+        if resultsState.selection.selectedCandidateIDs.contains(candidateID) {
+            resultsState.selection.selectedCandidateIDs.remove(candidateID)
+        } else {
+            resultsState.selection.selectedCandidateIDs.insert(candidateID)
+        }
+    }
+
+    func focusResultCandidate(_ candidateID: UUID) {
+        guard resultsState.groups.contains(where: { group in
+            group.candidates.contains(where: { $0.id == candidateID })
+        }) else { return }
+        resultsState.focusedCandidateID = candidateID
+    }
+
+    func toggleResultGroup(_ groupID: ResultGroupID) {
+        guard resultsState.groups.contains(where: { $0.id == groupID }) else { return }
+        if resultsState.expandedGroupIDs.contains(groupID) {
+            resultsState.expandedGroupIDs.remove(groupID)
+        } else {
+            resultsState.expandedGroupIDs.insert(groupID)
+        }
     }
 
     private func apply(_ outcome: PreflightOutcome, requestID: UUID) {

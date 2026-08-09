@@ -279,14 +279,137 @@ struct AnalysisView: View {
 }
 
 struct ResultsView: View {
+    let state: ResultsState
+    let onToggleSelection: (UUID) -> Void
+    let onFocusCandidate: (UUID) -> Void
+    let onToggleGroup: (ResultGroupID) -> Void
     let onReturnHome: () -> Bool
 
     var body: some View {
-        PlaceholderContainer(title: "結果（仮画面）") {
-            Button("ホームへ戻る") {
-                onReturnHome()
+        if state.candidateCount == 0 {
+            VStack(spacing: 20) {
+                Text("今回は条件に合う場面が見つかりませんでした。")
+                    .font(.title2)
+                Button("ホームへ戻る") { onReturnHome() }
             }
+            .frame(minWidth: 720, minHeight: 520)
+            .padding(32)
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("解析結果 \(state.candidateCount)件")
+                    .font(.largeTitle.bold())
+
+                HSplitView {
+                    candidateList
+                        .frame(minWidth: 320)
+                    candidateDetail
+                        .frame(minWidth: 320)
+                }
+
+                HStack {
+                    Text("\(state.selectedCount)件を選択中")
+                        .font(.headline)
+                    Spacer()
+                    Button("ホームへ戻る") { onReturnHome() }
+                }
+            }
+            .frame(minWidth: 760, minHeight: 560)
+            .padding(24)
         }
+    }
+
+    private var candidateList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(state.groups) { group in
+                    DisclosureGroup(
+                        isExpanded: Binding(
+                            get: { state.expandedGroupIDs.contains(group.id) },
+                            set: { _ in onToggleGroup(group.id) }
+                        )
+                    ) {
+                        VStack(spacing: 6) {
+                            ForEach(group.candidates) { candidate in
+                                candidateRow(candidate)
+                            }
+                        }
+                        .padding(.top, 6)
+                    } label: {
+                        Text("\(group.title) \(group.candidates.count)件")
+                            .font(.headline)
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private func candidateRow(_ candidate: ResultCandidate) -> some View {
+        HStack(spacing: 8) {
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { state.selectedCandidateIDs.contains(candidate.id) },
+                    set: { _ in onToggleSelection(candidate.id) }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.checkbox)
+
+            Button {
+                onFocusCandidate(candidate.id)
+            } label: {
+                HStack {
+                    Text(Self.formatTimestamp(candidate.startMilliseconds))
+                        .monospacedDigit()
+                    Text(Self.formatDuration(candidate.durationMilliseconds))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(candidate.quality.symbol)
+                        .font(.headline)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(
+            state.focusedCandidateID == candidate.id ? Color.accentColor.opacity(0.12) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder
+    private var candidateDetail: some View {
+        if let candidate = state.focusedCandidate {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(state.focusedGroupTitle ?? "人物不明")
+                    .font(.title2.bold())
+                Text("\(Self.formatTimestamp(candidate.startMilliseconds)) - \(Self.formatTimestamp(candidate.endMilliseconds))")
+                    .monospacedDigit()
+                Divider()
+                LabeledContent("人物一致", value: candidate.characterMatch.title)
+                LabeledContent("品質", value: "\(candidate.quality.symbol) \(candidate.quality.title)")
+                if let qualityReason = candidate.qualityReason {
+                    Text(qualityReason)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(20)
+        } else {
+            ContentUnavailableView("候補を選んでください", systemImage: "list.bullet.rectangle")
+        }
+    }
+
+    private static func formatTimestamp(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return String(format: "%02lld:%02lld:%02lld", seconds / 3_600, (seconds % 3_600) / 60, seconds % 60)
+    }
+
+    private static func formatDuration(_ milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return "\(seconds)秒"
     }
 }
 

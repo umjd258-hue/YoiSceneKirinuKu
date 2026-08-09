@@ -328,6 +328,100 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(subject.analysisState, .initial)
     }
 
+    func testResultsGroupsAreTimeOrderedAndUnknownStartsCollapsed() {
+        let state = ResultsState.initial
+
+        for group in state.groups {
+            XCTAssertEqual(group.candidates.map(\.startMilliseconds), group.candidates.map(\.startMilliseconds).sorted())
+        }
+        XCTAssertFalse(state.expandedGroupIDs.contains(.unknown))
+        XCTAssertTrue(state.groups.contains(where: { $0.id == .unknown }))
+    }
+
+    func testResultsInitialSelectionUsesQualityAndUnknownRulesSeparately() throws {
+        let state = ResultsState.initial
+        let candidates = state.groups.flatMap(\.candidates)
+        let knownExcellentOrGood = candidates.filter {
+            $0.characterMatch != .unknown && $0.quality.isInitiallySelected
+        }
+        let unknownExcellent = try XCTUnwrap(candidates.first {
+            $0.characterMatch == .unknown && $0.quality == .excellent
+        })
+        let knownReview = try XCTUnwrap(candidates.first {
+            $0.characterMatch != .unknown && $0.quality == .needsReview
+        })
+
+        XCTAssertEqual(state.selectedCandidateIDs, Set(knownExcellentOrGood.map(\.id)))
+        XCTAssertFalse(state.selectedCandidateIDs.contains(unknownExcellent.id))
+        XCTAssertFalse(state.selectedCandidateIDs.contains(knownReview.id))
+        XCTAssertEqual(unknownExcellent.quality, .excellent)
+        XCTAssertEqual(unknownExcellent.characterMatch, .unknown)
+    }
+
+    func testResultSelectionCountChangesOnlyForExistingCandidates() throws {
+        let subject = AppViewModel()
+        let candidate = try XCTUnwrap(subject.resultsState.groups.flatMap(\.candidates).first)
+        let initialCount = subject.resultsState.selectedCount
+
+        subject.toggleResultSelection(candidate.id)
+        XCTAssertEqual(subject.resultsState.selectedCount, initialCount - 1)
+
+        subject.toggleResultSelection(candidate.id)
+        XCTAssertEqual(subject.resultsState.selectedCount, initialCount)
+
+        subject.toggleResultSelection(UUID())
+        XCTAssertEqual(subject.resultsState.selectedCount, initialCount)
+    }
+
+    func testResultFocusAndGroupExpansionRejectUnknownIDs() throws {
+        let subject = AppViewModel()
+        let unknownGroup = try XCTUnwrap(subject.resultsState.groups.first(where: { $0.id == .unknown }))
+        let candidate = try XCTUnwrap(unknownGroup.candidates.first)
+
+        subject.toggleResultGroup(.unknown)
+        XCTAssertTrue(subject.resultsState.expandedGroupIDs.contains(.unknown))
+        subject.focusResultCandidate(candidate.id)
+        XCTAssertEqual(subject.resultsState.focusedCandidateID, candidate.id)
+        XCTAssertEqual(subject.resultsState.focusedGroupTitle, "人物不明")
+
+        let missingID = UUID()
+        subject.focusResultCandidate(missingID)
+        subject.toggleResultGroup(.character(missingID))
+        XCTAssertEqual(subject.resultsState.focusedCandidateID, candidate.id)
+        XCTAssertFalse(subject.resultsState.expandedGroupIDs.contains(.character(missingID)))
+    }
+
+    func testEmptyResultsAreNormalAndHaveNoSelection() {
+        let state = ResultsState.empty
+
+        XCTAssertEqual(state.candidateCount, 0)
+        XCTAssertEqual(state.selectedCount, 0)
+        XCTAssertNil(state.focusedCandidate)
+        XCTAssertNil(state.focusedGroupTitle)
+    }
+
+    func testResultUIModelContainsLabelsInsteadOfRawAIScores() {
+        let candidateMirrorLabels = Set(Mirror(reflecting: ResultCandidate(
+            id: UUID(),
+            startMilliseconds: 0,
+            durationMilliseconds: 1_000,
+            quality: .good,
+            characterMatch: .medium,
+            qualityReason: nil
+        )).children.compactMap(\.label))
+
+        XCTAssertEqual(candidateMirrorLabels, [
+            "id",
+            "startMilliseconds",
+            "durationMilliseconds",
+            "quality",
+            "characterMatch",
+            "qualityReason",
+        ])
+        XCTAssertFalse(candidateMirrorLabels.contains(where: { $0.lowercased().contains("score") }))
+        XCTAssertFalse(candidateMirrorLabels.contains(where: { $0.lowercased().contains("probability") }))
+    }
+
     func testSuccessfulPreflightUpdatesOnlyVideoState() async {
         let result = PreflightResult(
             fileName: "episode01.mp4",

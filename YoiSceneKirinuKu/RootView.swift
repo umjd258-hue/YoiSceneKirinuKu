@@ -26,7 +26,13 @@ struct RootView: View {
                 onReturnHome: appViewModel.returnHome
             )
         case .results:
-            ResultsView(onReturnHome: appViewModel.returnHome)
+            ResultsView(
+                state: appViewModel.resultsState,
+                onToggleSelection: appViewModel.toggleResultSelection,
+                onFocusCandidate: appViewModel.focusResultCandidate,
+                onToggleGroup: appViewModel.toggleResultGroup,
+                onReturnHome: appViewModel.returnHome
+            )
         case .characters:
             CharactersView(onReturnHome: appViewModel.returnHome)
         }
