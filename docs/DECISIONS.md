@@ -628,3 +628,41 @@
 ### 判定
 
 自動検証と静的監査の範囲で第8A段階は完了状態を維持する。未検証事項を検証済みへ変更せず、後続Gateの判断も先行確定していない。
+
+---
+
+## 2026-08-09：第8B開始Gateの原子性・復旧契約
+
+### 対象Stage
+
+第8B段階「既存人物への登録音声追加本処理」開始Gate
+
+### 確認済み事項
+
+- `/private/tmp` の人工ディレクトリを使い、macOSの `renameatx_np(..., RENAME_SWAP)` で2つの非空ディレクトリを原子的に交換できることを確認した。
+- 交換後は正式側に新内容、staging側に旧内容があり、正式パスを欠落させる中間状態を作らない候補方式が成立した。
+
+### 決定事項
+
+- 同じ人物への追加は `.partial` 内の人物別lock fileと非待機 `fcntl.flock` で排他し、競合は `registration_character_busy` として拒否する。
+- 正式人物を直接変更せず、検証済み人物全体をpartialへcopy-on-writeし、新sampleと更新済み `character.json` を完成させてから人物全体を再検証する。
+- 更新済み候補と正式人物を `RENAME_SWAP` で交換し、非原子的な複数renameへfallbackしない。
+- swap前のクラッシュでは旧人物、swap後のクラッシュでは事前検証済み新人物を正式状態とする。partial側の残存物は一覧から無視する。
+- swap後の正式人物をPythonが再検証し、Swift再読込みで新sample IDを確認した場合だけ追加成功と件数増加を表示する。
+- 既存人物不在は `registration_character_not_found`、人物排他競合は `registration_character_busy` とする。
+
+### 理由
+
+- 既存 `character.json` やsampleを直接変更すると、メタデータとフォルダの不一致を観測するクラッシュ窓が生じる。
+- 完成人物全体のatomic swapなら、正式パスには旧完全版または新完全版のどちらかだけが存在する。
+- OS解放の `flock` はstale時刻、PID再利用、heartbeat、owner tokenの推測を第8Bへ持ち込まずに同時更新を拒否できる。
+
+### 未決定・後続事項
+
+- `RENAME_SWAP` を含む完成版のSandbox下での挙動は第22開始Gateまで未検証とする。
+- partialの一般reconciliationと清掃時期は、人物一覧の正しさへ影響させず後続の復旧統合で扱う。
+- 人物削除の排他・削除対象・失敗復旧は第8C開始Gateまで未決定とする。
+
+### Gate判定
+
+新sample追加の原子性、人物メタデータ更新順、競合拒否、クラッシュ境界を正本へ反映したため、第8B開始Gateを通過済みとする。第8B本体は未実装であり、完了扱いにしない。

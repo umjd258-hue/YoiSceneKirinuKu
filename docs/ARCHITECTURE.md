@@ -217,7 +217,13 @@ characters/.partial/char_xxxxx
 
 既存人物へsampleを追加する場合は、新sampleだけを一時領域で生成・検証する。`source.wav`、Embedding、メタデータがすべて正式化可能になってから人物データへ関連付ける。
 
-新規人物の正式化、失敗時の不変条件、品質検証条件は本節の契約とする。既存人物へのsample追加では既存 `character.json` 更新を伴うため、その原子性とクラッシュ復旧を第8B開始Gateで追加決定する。
+新規人物の正式化、失敗時の不変条件、品質検証条件は本節の契約とする。第8Bでは、人物IDごとの固定lock fileを `.partial` 内に置き、非待機の `fcntl.flock` 排他を追加開始前から正式化後の検証完了まで保持する。同じ人物への競合要求は `registration_character_busy` で拒否し、既存人物を変更しない。lock fileは削除・置換せず、プロセス終了時にOSが排他を解放する。待機時間、PID、heartbeat、owner tokenは導入しない。
+
+追加処理は既存人物ディレクトリを直接更新しない。正式人物を検証後、通常ファイルだけを `.partial/update_<UUID>/char_<UUID>` へcopy-on-writeで複製し、その複製内で新sampleを生成・検証する。新 `sample.json` を確定後、追加後の全 `sample_ids` を持つ `character.json` を複製内で最後に更新し、人物全体を再読込み検証する。既存IDの再利用、symlink、想定外項目、人物ID不一致は拒否する。
+
+検証済み更新候補と正式人物は、同一volume上でmacOSの `renameatx_np(..., RENAME_SWAP)` により原子的に交換する。限定人工ディレクトリ検証では、交換後に正式パスへ新内容、partial側へ旧内容が一操作で移ることを確認した。交換前に停止・失敗・クラッシュした場合は旧人物だけが正式であり、交換後にクラッシュした場合は事前検証済みの新人物だけが正式となる。partial側の旧人物または未完成更新候補は人物一覧から無視する。交換後に正式人物を再検証し、Swiftが再読込みして新sample IDを確認した場合だけUI件数を増やす。
+
+交換後の旧人物コピーは、正式人物の再検証後に限り、固定 `.partial/update_<UUID>` 配下で期待構造と非symlinkを再確認して清掃できる。清掃失敗は正式人物を失敗へ戻さず、無視可能なpartialとして残す。`renameatx_np` が利用できない場合やatomic swapに失敗した場合は `registration_finalization_failed` とし、非原子的な複数renameへfallbackしない。存在しない人物は `registration_character_not_found` とする。
 
 ### 人物削除
 
