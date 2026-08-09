@@ -40,6 +40,15 @@ struct HomeState: Equatable {
         isAnalysisSlotAvailable: false
     )
 
+    static let runtimeInitial = HomeState(
+        video: .unselected,
+        registeredCharacters: [],
+        selectedCharacterIDs: [],
+        isAIModelAvailable: false,
+        isWorkspaceAvailable: false,
+        isAnalysisSlotAvailable: false
+    )
+
     var selectedCharacters: [CharacterSummary] {
         registeredCharacters.filter { selectedCharacterIDs.contains($0.id) }
     }
@@ -247,6 +256,7 @@ enum NewCharacterRegistrationPhase: Equatable {
     case editing
     case registrationRequested
     case registered
+    case failed(message: String)
 }
 
 struct NewCharacterRegistrationState: Equatable {
@@ -266,9 +276,12 @@ struct NewCharacterRegistrationState: Equatable {
         guard let startMilliseconds,
               let endMilliseconds,
               let videoDurationMilliseconds else { return false }
+        let length = endMilliseconds - startMilliseconds
         return startMilliseconds >= 0
             && startMilliseconds < endMilliseconds
             && endMilliseconds <= videoDurationMilliseconds
+            && length >= 3_000
+            && length <= 30_000
     }
 
     var canRequestRegistration: Bool {
@@ -279,7 +292,7 @@ struct NewCharacterRegistrationState: Equatable {
     }
 }
 
-struct RegisteredAudioSampleSummary: Identifiable, Equatable {
+struct RegisteredAudioSampleSummary: Identifiable, Equatable, Sendable {
     let id: UUID
     let sourceFileName: String
     let durationMilliseconds: Int64
@@ -364,19 +377,25 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var characterManagementState = CharacterManagementState.initial
     @Published private(set) var existingCharacterSampleAddition = ExistingCharacterSampleAdditionState()
     private let preflightService: any PreflightServicing
+    private let characterRegistrationService: any CharacterRegistrationServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
+    private var registrationTask: Task<Void, Never>?
+    private var characterReloadTask: Task<Void, Never>?
+    private var currentRegistrationRequestID: UUID?
 
     init(
         homeState: HomeState = .initial,
         analysisState: AnalysisState = .initial,
         resultsState: ResultsState = .initial,
-        preflightService: any PreflightServicing = PreflightService()
+        preflightService: any PreflightServicing = PreflightService(),
+        characterRegistrationService: any CharacterRegistrationServicing = CharacterRegistrationService()
     ) {
         self.homeState = homeState
         self.analysisState = analysisState
         self.resultsState = resultsState
         self.preflightService = preflightService
+        self.characterRegistrationService = characterRegistrationService
     }
 
     func selectVideo(_ url: URL) {
@@ -542,19 +561,56 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func requestNewCharacterRegistration() -> Bool {
-        guard newCharacterRegistration.canRequestRegistration else { return false }
+        guard newCharacterRegistration.canRequestRegistration,
+              let sourceURL = newCharacterRegistration.videoURL,
+              let startMilliseconds = newCharacterRegistration.startMilliseconds,
+              let endMilliseconds = newCharacterRegistration.endMilliseconds else { return false }
+        let request = CharacterRegistrationRequest(
+            displayName: newCharacterRegistration.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            sourceURL: sourceURL,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        let requestID = UUID()
+        currentRegistrationRequestID = requestID
         newCharacterRegistration.phase = .registrationRequested
+        registrationTask = Task { [weak self, characterRegistrationService] in
+            let outcome = await characterRegistrationService.register(request, requestID: requestID)
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success:
+                let reload = await characterRegistrationService.loadCharacters(requestID: UUID())
+                guard !Task.isCancelled else { return }
+                self?.applyRegistration(outcome, reload: reload, requestID: requestID)
+            case .failure:
+                self?.applyRegistration(outcome, reload: nil, requestID: requestID)
+            }
+        }
         return true
     }
 
-    @discardableResult
-    func confirmNewCharacterRegistrationCompleted() -> Bool {
-        guard newCharacterRegistration.phase == .registrationRequested else { return false }
-        newCharacterRegistration.phase = .registered
-        return true
+    func reloadRegisteredCharacters() {
+        let requestID = UUID()
+        characterReloadTask = Task { [weak self, characterRegistrationService] in
+            let outcome = await characterRegistrationService.loadCharacters(requestID: requestID)
+            guard !Task.isCancelled else { return }
+            if case .success(let characters) = outcome {
+                self?.replaceRegisteredCharacters(with: characters)
+            }
+        }
+    }
+
+    func waitForCharacterRegistrationForTesting() async {
+        await registrationTask?.value
+    }
+
+    func waitForCharacterReloadForTesting() async {
+        await characterReloadTask?.value
     }
 
     func cancelNewCharacterRegistration() {
+        guard newCharacterRegistration.phase != .registrationRequested else { return }
+        currentRegistrationRequestID = nil
         newCharacterRegistration = NewCharacterRegistrationState()
     }
 
@@ -666,6 +722,42 @@ final class AppViewModel: ObservableObject {
         case .failure(let code):
             homeState.video = .failed(message: code.userMessage)
         }
+    }
+
+    private func applyRegistration(
+        _ outcome: CharacterRegistrationOutcome,
+        reload: CharacterLoadOutcome?,
+        requestID: UUID
+    ) {
+        guard currentRegistrationRequestID == requestID,
+              newCharacterRegistration.phase == .registrationRequested else { return }
+        switch outcome {
+        case .success(let registered):
+            guard case .success(let characters) = reload,
+                  characters.contains(where: { $0.characterID == registered.characterID }) else {
+                newCharacterRegistration.phase = .failed(message: CharacterRegistrationErrorCode.protocolError.userMessage)
+                return
+            }
+            replaceRegisteredCharacters(with: characters)
+            newCharacterRegistration.phase = .registered
+        case .failure(let code):
+            newCharacterRegistration.phase = .failed(message: code.userMessage)
+        }
+        currentRegistrationRequestID = nil
+    }
+
+    private func replaceRegisteredCharacters(with characters: [RegisteredCharacter]) {
+        let summaries = characters.map { CharacterSummary(id: $0.characterID, name: $0.displayName) }
+        homeState.registeredCharacters = summaries
+        let availableIDs = Set(summaries.map(\.id))
+        homeState.selectedCharacterIDs.formIntersection(availableIDs)
+        characterManagementState.samplesByCharacterID = Dictionary(uniqueKeysWithValues: characters.map {
+            ($0.characterID, $0.samples)
+        })
+        if let selected = characterManagementState.selectedCharacterID, availableIDs.contains(selected) {
+            return
+        }
+        characterManagementState.selectedCharacterID = summaries.first?.id
     }
 
     private static func formatDuration(milliseconds: Int64) -> String {

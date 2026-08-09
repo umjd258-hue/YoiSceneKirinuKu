@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class AppViewModelTests: XCTestCase {
+    func testRuntimeInitialStateDoesNotExposeMockCharacters() {
+        let subject = AppViewModel(homeState: .runtimeInitial)
+
+        XCTAssertEqual(subject.homeState.characters, .unregistered)
+        XCTAssertTrue(subject.homeState.registeredCharacters.isEmpty)
+    }
+
     private let conan = CharacterSummary(
         id: UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!,
         name: "コナン"
@@ -457,8 +464,19 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(subject.newCharacterRegistration.canRequestRegistration)
     }
 
-    func testRegistrationRequestDoesNotAddCharacterBeforeFormalCompletion() {
-        let subject = AppViewModel()
+    func testRegistrationRequestAddsCharacterOnlyAfterFormalReload() async {
+        let characterID = UUID(uuidString: "f66e4bc4-2cff-402e-a8fb-735c5c5f702a")!
+        let sampleID = UUID(uuidString: "64af25dd-177f-4d90-a5fc-1a17e538c4d7")!
+        let registered = RegisteredCharacter(
+            characterID: characterID,
+            displayName: "新規人物",
+            samples: [RegisteredAudioSampleSummary(id: sampleID, sourceFileName: "source.wav", durationMilliseconds: 7_000)]
+        )
+        let service = ImmediateCharacterRegistrationService(
+            registration: .success(registered),
+            load: .success([registered])
+        )
+        let subject = AppViewModel(characterRegistrationService: service)
         let initialCharacters = subject.homeState.registeredCharacters
         XCTAssertTrue(subject.navigateToCharacters())
         XCTAssertTrue(subject.beginNewCharacterRegistration())
@@ -475,10 +493,78 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(subject.requestNewCharacterRegistration())
         XCTAssertEqual(subject.newCharacterRegistration.phase, .registrationRequested)
         XCTAssertEqual(subject.homeState.registeredCharacters, initialCharacters)
+        await subject.waitForCharacterRegistrationForTesting()
 
-        XCTAssertTrue(subject.confirmNewCharacterRegistrationCompleted())
         XCTAssertEqual(subject.newCharacterRegistration.phase, .registered)
+        XCTAssertEqual(subject.homeState.registeredCharacters, [CharacterSummary(id: characterID, name: "新規人物")])
+        XCTAssertEqual(subject.characterManagementState.samples(for: characterID), registered.samples)
+    }
+
+    func testRegistrationFailureDoesNotAddCharacter() async {
+        let subject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.audioTooQuiet),
+            load: .success([])
+        ))
+        let initialCharacters = subject.homeState.registeredCharacters
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+        subject.updateNewCharacterName("新規人物")
+        subject.selectNewCharacterVideo(URL(fileURLWithPath: "/tmp/registration.mp4"), durationMilliseconds: 30_000)
+        subject.updateNewCharacterCurrentPosition(2_000)
+        subject.setNewCharacterRangeStart()
+        subject.updateNewCharacterCurrentPosition(9_000)
+        subject.setNewCharacterRangeEnd()
+
+        XCTAssertTrue(subject.requestNewCharacterRegistration())
+        await subject.waitForCharacterRegistrationForTesting()
+
+        XCTAssertEqual(subject.newCharacterRegistration.phase, .failed(message: CharacterRegistrationErrorCode.audioTooQuiet.userMessage))
         XCTAssertEqual(subject.homeState.registeredCharacters, initialCharacters)
+    }
+
+    func testRegistrationRangeUsesGateLimits() {
+        let subject = AppViewModel()
+        XCTAssertTrue(subject.navigateToCharacters())
+        XCTAssertTrue(subject.beginNewCharacterRegistration())
+        subject.updateNewCharacterName("新規人物")
+        subject.selectNewCharacterVideo(URL(fileURLWithPath: "/tmp/registration.mp4"), durationMilliseconds: 60_000)
+
+        subject.updateNewCharacterCurrentPosition(1_000)
+        subject.setNewCharacterRangeStart()
+        subject.updateNewCharacterCurrentPosition(3_999)
+        subject.setNewCharacterRangeEnd()
+        XCTAssertFalse(subject.newCharacterRegistration.hasValidRange)
+
+        subject.updateNewCharacterCurrentPosition(4_000)
+        subject.setNewCharacterRangeEnd()
+        XCTAssertTrue(subject.newCharacterRegistration.hasValidRange)
+
+        subject.updateNewCharacterCurrentPosition(31_001)
+        subject.setNewCharacterRangeEnd()
+        XCTAssertFalse(subject.newCharacterRegistration.hasValidRange)
+    }
+
+    func testReloadUsesOnlyValidatedServiceResults() async {
+        let characterID = UUID(uuidString: "f66e4bc4-2cff-402e-a8fb-735c5c5f702a")!
+        let registered = RegisteredCharacter(
+            characterID: characterID,
+            displayName: "正式人物",
+            samples: [RegisteredAudioSampleSummary(
+                id: UUID(uuidString: "64af25dd-177f-4d90-a5fc-1a17e538c4d7")!,
+                sourceFileName: "source.wav",
+                durationMilliseconds: 5_000
+            )]
+        )
+        let subject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.invalidRequest),
+            load: .success([registered])
+        ))
+
+        subject.reloadRegisteredCharacters()
+        await subject.waitForCharacterReloadForTesting()
+
+        XCTAssertEqual(subject.homeState.registeredCharacters, [CharacterSummary(id: characterID, name: "正式人物")])
+        XCTAssertEqual(subject.characterManagementState.selectedCharacterID, characterID)
     }
 
     func testCancellingNewCharacterRegistrationDiscardsDraft() {
@@ -807,6 +893,19 @@ private struct ImmediatePreflightService: PreflightServicing {
     let outcome: PreflightOutcome
 
     func run(sourceURL: URL, requestID: UUID) async -> PreflightOutcome { outcome }
+}
+
+private struct ImmediateCharacterRegistrationService: CharacterRegistrationServicing {
+    let registration: CharacterRegistrationOutcome
+    let load: CharacterLoadOutcome
+
+    func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        registration
+    }
+
+    func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome {
+        load
+    }
 }
 
 private actor ControlledPreflightService: PreflightServicing {

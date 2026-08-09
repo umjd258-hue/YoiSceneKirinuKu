@@ -753,10 +753,13 @@ private struct NewCharacterRegistrationView: View {
                     .foregroundStyle(.secondary)
             case .registered:
                 ContentUnavailableView("人物登録が完了しました", systemImage: "checkmark.circle")
+            case .failed(let message):
+                ContentUnavailableView(message, systemImage: "exclamationmark.triangle")
             }
 
             HStack {
                 Button(state.phase == .editing ? "キャンセル" : "閉じる") { onCancel() }
+                    .disabled(state.phase == .registrationRequested)
                 Spacer()
                 if state.phase == .editing {
                     Button("この人物を登録") { onRequestRegistration() }

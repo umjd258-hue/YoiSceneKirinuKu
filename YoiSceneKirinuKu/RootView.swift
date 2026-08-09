@@ -1,9 +1,15 @@
 import SwiftUI
 
 struct RootView: View {
-    @StateObject private var appViewModel = AppViewModel()
+    @StateObject private var appViewModel = AppViewModel(homeState: .runtimeInitial)
 
     var body: some View {
+        content
+            .task { appViewModel.reloadRegisteredCharacters() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch appViewModel.route {
         case .home:
             HomeView(
