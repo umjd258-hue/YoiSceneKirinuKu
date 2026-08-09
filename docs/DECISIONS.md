@@ -1259,3 +1259,48 @@ schema、正式化・再利用、生成数値、境界、安定ID、所有権、
 ### Gate判定
 
 解析候補Embedding、選択人物比較、内部score範囲、正式中間成果物、再利用、開発時モデル配置を正本化したため、第13開始Gateを通過済みとする。第13本体は未実装であり、完了扱いにしない。
+
+---
+
+## 2026-08-10：第13段階の実装・最終検証
+
+### 対象Stage
+
+第13段階「Speaker Embeddingと人物判定」
+
+### 実装内容
+
+- 正式`analysis.wav`、`vad.json`、`speaker_candidates.json`を再検証し、候補区間のPCM sampleから192次元L2正規化Embeddingを生成するPython処理を追加した。
+- 正式jobで選択された人物だけを読み、各人物の全sampleを厳密検証してcentroidを再計算し、候補とのcosine similarityを内部`speaker_matches.json`へ保存する。
+- 候補・人物sample構成・モデルをfingerprintで結び付け、partial、fsync、rename、正式再読込み後だけ完成扱いとする。人物資産変更後のstale結果は再利用しない。
+- Swift Serviceは設定済みPython・モデル・jobを検証し、stdout JSON Linesの順序、件数progress、安定error、finished、正常exitを検証する。progressとSwift結果へ生スコアを含めない。
+- 後続段階から認識できるよう、既存ジョブ成果物の許可リストへ`speaker_matches.json`だけを追加した。
+
+### 成功した検証
+
+- Python構文検査が成功した。
+- Python単体テスト全46件が成功した。第13段階の5件で、選択人物2件との比較、正式化・再利用、候補0件、壊れた非選択人物を読まないこと、人物Embedding変更後のstale拒否、モデル欠損時の正式成果物非生成を確認した。
+- `Info.plist`とXcode projectの構文検査が成功した。
+- Debugビルドが成功した。
+- 第13段階のSwift単体テスト3件が成功した。厳密な進捗順序、候補0件、生スコアを混入したprogress、件数飛びを検証した。
+- `git diff --check`が成功した。
+
+### Swift全体テストの2分中断
+
+- Swift全体テストは、第13テストより前に実行される既存`JobManagementTests.testRecoverySeparatesFolderFromRunningAndDetectsSourceChange`で停止し、指示された2分上限で中断した。このためSwift全体テストを完走・成功とは記録しない。
+- 中断前にAnalysisAudio 3件、AppViewModel 50件、CandidateGeneration 3件など、当該テストより前のテストはすべて成功した。
+- 停止時に動作していた対象は既存`analysis_job_runner.py`と既存人物登録Python subprocessであり、第13の`SpeakerMatchingService`および`speaker_matching.py`は当該テストから呼ばれない。
+- 第12段階で同じ既存テストを単独再現し、Xcodeテスト環境下ではscript本体へ到達する前のPython起動・import中に停止する一方、Xcode外では同じrunnerが約0.033秒で起動・終了することを確認済みである。
+- 以上から、今回の停止は第13変更による機能不良ではなく、既知のXcodeテスト環境下Python subprocess問題として扱う。追加修正・再テストは行わない。
+
+### 未決定・未検証事項
+
+- 実人物、雑音、残響、複数話者、マイク・端末差での識別精度は未検証とする。
+- 人物一致閾値、人物不明判定、人物一致表示変換は第15開始Gateまで未決定とする。
+- 音声品質判定と◎／○／△は人物比較から独立した後続責務とする。
+- 完成版Python、SpeechBrain、PyTorch、モデルの配置・同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
+- Xcodeテスト環境下の既存Python subprocess起動停止は別の環境課題として残す。
+
+### Stage判定
+
+第13固有の実装、Python全テスト、第13固有Swiftテスト、Debugビルド、設定・差分検査が成功し、Swift全体テストの停止が第13実行経路外の既知問題であるため、第13段階を完了とする。人物一致閾値、人物不明、音声品質または完成版モデル配置の完了を意味しない。

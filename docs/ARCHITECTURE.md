@@ -383,7 +383,7 @@ partialは固定`.partial/vad_<request_id>.json.partial`と`.partial/speaker_can
 
 比較対象は正式`job.json`の`selected_character_ids`に含まれる人物だけとする。各選択人物について、正式`character.json`と全`sample.json`、元`source.wav` fingerprint、192要素float32のL2正規化`embedding.npy`を厳密に再検証し、第6節の算術平均後再L2正規化規則でcentroidをメモリ内に再計算する。非選択人物の資産は読まず、比較もしない。候補が非選択人物に一致するかは推測せず、選択人物との比較結果だけを第15段階へ渡す。
 
-`speaker_matches.json`の必須fieldは`schema_version`、`job_id`、`speaker_candidates_fingerprint`、`model`、`selected_characters`、`candidates`とする。`speaker_candidates_fingerprint`は正式`speaker_candidates.json`の`algorithm: "sha256"`、`byte_count`、`digest`を持つ。`model`は`model_id: "speechbrain/spkrec-ecapa-voxceleb"`、固定revision、`dimension: 192`、`dtype: "float32"`、`normalization: "l2"`を持つ。`selected_characters`はjobの順序を維持し、各人物について`character_id`と、centroid入力となる時刻順の`sample_id`・`embedding.npy`全byte SHA-256を持つ。これを人物資産変更時の再利用拒否根拠とする。
+`speaker_matches.json`の必須fieldは`schema_version`、`job_id`、`speaker_candidates_fingerprint`、`model`、`selected_characters`、`candidates`とする。`speaker_candidates_fingerprint`は正式`speaker_candidates.json`の`algorithm: "sha256"`、`byte_count`、`digest`を持つ。`model`は`model_id: "speechbrain/spkrec-ecapa-voxceleb"`、固定revision、`dimension: 192`、`dtype: "float32"`、`normalization: "l2"`を持つ。`selected_characters`はjobの順序を維持し、各人物について`character_id`と、`character.json`の`sample_ids`順にcentroid入力となる`sample_id`・`embedding.npy`全byte SHA-256を持つ。これを人物資産変更時の再利用拒否根拠とする。
 
 各candidateは正式候補と同じ`candidate_id`を1回だけ持ち、`comparisons`には選択人物全件をjob順で格納する。各比較は`character_id`と有限なJSON numberの`cosine_similarity`を持ち、範囲は-1以上1以下とする。これはPython内部の後段判定材料であり、本人確率ではない。SwiftのUI model、progress、error、通常ログへ値を渡さない。最高人物、人物不明、人物一致閾値、表示段階は第15開始Gateまで決定・永続化しない。候補0件は空の`candidates`を持つ正常成果物とする。
 

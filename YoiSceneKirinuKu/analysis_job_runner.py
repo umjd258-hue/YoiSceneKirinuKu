@@ -245,7 +245,7 @@ def recover_job(workspace: Path) -> dict[str, Any]:
         raise JobFailure("job_not_found")
     allowed = {
         "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
-        "vad.json", "speaker_candidates.json",
+        "vad.json", "speaker_candidates.json", "speaker_matches.json",
     }
     if {item.name for item in current.iterdir()} - allowed:
         raise JobFailure("job_workspace_invalid")

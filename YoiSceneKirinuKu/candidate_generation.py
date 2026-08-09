@@ -332,7 +332,7 @@ def run(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
         current = workspace / "current_job"
         if not current.is_dir() or current.is_symlink():
             raise CandidateFailure("candidate_job_invalid")
-        allowed = {"job.json", "stop.requested", "analysis.wav", "analysis_audio.json", "vad.json", "speaker_candidates.json"}
+        allowed = {"job.json", "stop.requested", "analysis.wav", "analysis_audio.json", "vad.json", "speaker_candidates.json", "speaker_matches.json"}
         if {item.name for item in current.iterdir()} - allowed:
             raise CandidateFailure("candidate_job_invalid")
         try:

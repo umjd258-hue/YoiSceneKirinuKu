@@ -36,6 +36,10 @@
 	<string>$(VAD_PYTHON_EXECUTABLE)</string>
 	<key>CandidateGenerationPythonExecutable</key>
 	<string>$(CANDIDATE_GENERATION_PYTHON_EXECUTABLE)</string>
+	<key>SpeakerMatchingPythonExecutable</key>
+	<string>$(SPEAKER_MATCHING_PYTHON_EXECUTABLE)</string>
+	<key>SpeakerMatchingModelDirectory</key>
+	<string>$(SPEAKER_MATCHING_MODEL_DIRECTORY)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
 	<key>PreflightFFprobeExecutable</key>
