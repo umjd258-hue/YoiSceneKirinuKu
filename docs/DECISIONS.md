@@ -931,3 +931,70 @@
 ### 判定
 
 自動検証と静的監査の範囲で新しい問題はなく、第9段階は完了状態を維持する。後続Gate事項を検証済みへ変更していない。
+
+---
+
+## 2026-08-09：第10開始Gateの正式決定
+
+### 対象Stage
+
+第10段階「解析用音声 `analysis.wav`」開始Gate
+
+### 決定事項
+
+- 元動画の先頭音声streamだけを16 kHz、mono、PCM s16leのWAVへ変換する。
+- 固定workspaceのpartialへ排他的に生成し、WAV実体とmetadataを検証後、metadata、最後にWAVの順で正式化する。
+- `analysis_audio.json` schema version 1を追加し、job ID、元動画fingerprint、固定変換profile、stream index、frame数、整数ミリ秒durationを再利用証明とする。
+- 正式WAVとmetadataの両方がjobおよび実体と一致する場合だけ再利用し、一方だけ、partialだけ、未知schema、内容不一致は再利用しない。
+- 変換前後に元動画fingerprintを再確認し、途中変更、読取不能、容量不足、FFmpeg失敗、WAV検証失敗では正式化しない。
+- 開発時は検証済みローカルFFmpeg／ffprobeを設定経由で使用し、配布時配置は決定しない。
+
+### 理由
+
+- WAV単体では元動画と変換条件の対応を証明できないため、最小の厳密metadataを一組にする必要がある。
+- WAVを最後のcommit markerとして正式化すれば、クラッシュ途中のmetadataだけを完成音声と誤認しない。
+- 先頭音声streamと固定PCM profileに限定することで、初期版に音声track選択UIや未検証codec条件を追加しない。
+
+### 未決定・未検証事項
+
+- 配布時のPython／FFmpeg／ffprobe配置・同梱方式とApp Sandbox下の挙動は未決定とする。
+- 実SDカード切断中の読取・変換挙動は未検証とし、自動試験の人工的な読取不能と区別する。
+- VAD、候補生成、停止signal、保存容量契約を先行決定しない。
+
+### Gate判定
+
+第10開始に必要な変換、partial、検証、正式化、再利用、容量、error code、開発時実行契約を正本化したため、第10開始Gateを通過済みとする。第10本体は未実装であり、完了扱いにしない。
+
+---
+
+## 2026-08-09：第10段階実装・検証
+
+### 対象Stage
+
+第10段階「解析用音声 `analysis.wav`」
+
+### 実装内容
+
+- Pythonが正式jobとSource fingerprintを検証し、同じ`analysis.lock`を保持してから、先頭音声streamを固定16 kHz・mono・PCM s16leのWAVへ変換する。
+- FFmpeg／ffprobeはshellなし・引数配列で起動し、元動画を変更せず、固定workspaceのpartialだけへ出力する。
+- FFmpeg終了コードに加え、WAV header、sample rate、channel、sample幅、非圧縮PCM、frame数、整数ミリ秒durationを再読込み検証する。
+- `analysis_audio.json`へjob ID、Source fingerprint、変換profile、選択stream、frame数、durationを保存し、metadata、最後にWAVの順で正式化する。
+- 正式pairの完全一致時だけ再利用し、一方だけの正式成果物とstaleな既知partialはlock下で固定名・通常ファイル・非symlinkを確認して個別にreconciliationする。
+- Swift Serviceは開発設定の実行ファイルを外部入力としてPythonへ渡し、`running`、`completed`、terminal、exit、両EOFを満たした結果だけを成功として受理する。
+
+### 検証結果
+
+- Python構文検査と単体テスト全28件が成功した。そのうち第10段階8件で正常生成・再利用、容量不足、FFmpeg失敗、元動画読取不能、音声stream不在、fingerprint変更、未知metadata schema、orphan／partial復旧、dangling symlink拒否を確認した。
+- DebugビルドとSwift単体テスト全58件が成功した。そのうち第10段階3件で成功event順序、検証完了欠落、未知event、error一致、異常exitの拒否を確認した。
+- 人工MP4だけを使用し、正式WAVが16 kHz、mono、PCM s16leで正のframe数とdurationを持つことを機械的に確認した。
+- `git diff --check`が成功し、VAD、候補生成、人物判定、停止、保存を先行実装していないことを確認した。
+
+### 未決定・未検証事項
+
+- 実SDカードの処理中切断、App Sandbox、配布時のPython／FFmpeg／ffprobe配置は未検証・未決定のままとする。
+- FFmpeg長時間処理の停止signal、猶予時間、強制終了、Process groupは第14開始Gateまで未決定とする。
+- VAD以降の成果物と解析完了状態への遷移は後続段階へ残す。
+
+### Stage判定
+
+正式WAVが入力fingerprintおよび固定変換profileと対応し、失敗時または不完全pairを正式完成として再利用しないことを自動検証できたため、第10段階を完了とする。

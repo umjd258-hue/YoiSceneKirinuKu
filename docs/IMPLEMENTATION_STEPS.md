@@ -657,6 +657,8 @@ MP4を選択し、本解析へ進めるかを軽量に確認する実動作をHo
 
 元動画を変更せず、解析用音声をpartialで生成・検証・正式化する。
 
+2026-08-09の正本反映により、第10開始Gateは通過済みとする。先頭音声stream、16 kHz・mono・PCM s16le、`analysis_audio.json` schema、容量判定、partialと正式化順序、厳密再利用条件、error code、開発時FFmpeg／ffprobe配置を正式決定した。配布時配置、App Sandboxおよび実ストレージ切断は未決定・未検証のままとし、第10本体の完了を意味しない。
+
 ## 実装すること
 
 - `analysis.wav.partial` 相当への生成。

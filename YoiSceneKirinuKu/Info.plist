@@ -26,6 +26,12 @@
 	<string>$(CHARACTER_REGISTRATION_PYTHON_EXECUTABLE)</string>
 	<key>AnalysisJobPythonExecutable</key>
 	<string>$(ANALYSIS_JOB_PYTHON_EXECUTABLE)</string>
+	<key>AnalysisAudioFFmpegExecutable</key>
+	<string>$(ANALYSIS_AUDIO_FFMPEG_EXECUTABLE)</string>
+	<key>AnalysisAudioFFprobeExecutable</key>
+	<string>$(ANALYSIS_AUDIO_FFPROBE_EXECUTABLE)</string>
+	<key>AnalysisAudioPythonExecutable</key>
+	<string>$(ANALYSIS_AUDIO_PYTHON_EXECUTABLE)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
 	<key>PreflightFFprobeExecutable</key>

@@ -52,7 +52,8 @@ Python側は主に以下を担当する。
 |---|---|---|---|
 | `job.json` | Swift（内容・状態遷移。Python runnerがlock下で原子的に永続化） | Python | Swift |
 | `stop.requested` | Swift | Python | Swift |
-| `analysis.wav` | Python | Python | Swift |
+| `analysis.wav` | Python | Python | Python（第10の不完全な既知pair）・Swift |
+| `analysis_audio.json` | Python | Python・Swift | Python（第10の不完全な既知pair）・Swift |
 | `vad.json` | Python | Python | Swift |
 | `speaker_candidates.json` | Python | Python | Swift |
 | `result.json` | Python | Swift | Swift |
@@ -247,6 +248,7 @@ Pythonが正式パス不在を確認し、Swiftが正式人物一覧を再読込
 current_job/
 ├─ job.json
 ├─ analysis.wav
+├─ analysis_audio.json
 ├─ vad.json
 ├─ speaker_candidates.json
 ├─ result.json
@@ -327,6 +329,22 @@ lockはSwiftUI ViewではなくPython解析runnerが、解析要求を受理す�
 新規開始または復旧監査時、正式lockを取得したServiceだけが `stop.requested` を判定する。現在の `job.json.state == stop_requested` かつjob ID一致の場合だけ有効要求とする。それ以外の正しく検証できる停止要求はstaleとし、固定ファイル1件だけを個別unlinkして不在を確認する。symlink、未知項目、壊れたJSONは削除せず `job_workspace_invalid` でfail-closedとする。時刻や経過秒数でstaleを推測しない。停止完了表現と停止後清掃は第14開始Gateで確定する。
 
 workspaceはApplication Support配下の固定 `local.YoiSceneKirinuKu/workspace`、job領域はその直下の固定 `current_job` とする。第9段階で作成・更新・清掃できるのは `analysis.lock`、`current_job/job.json`、`current_job/stop.requested`、および名前とrequest IDを検証した対応partialだけとする。外部入力から削除パスを受け取らず、全親と対象の非symlink、canonicalな1階層、既知種類を検証する。glob、一般的な再帰削除、未知項目の削除、workspace root自身の削除を禁止する。後続段階が成果物を追加するたびに許可リストと清掃責務をその開始Gateで拡張する。
+
+### 8.6 第10段階の解析用音声契約
+
+`analysis.wav` は元動画の先頭音声stream（FFmpeg stream specifier `0:a:0`）だけを、16,000 Hz、1 channel、PCM signed 16-bit little-endian、WAV containerへ変換した解析専用成果物とする。動画、字幕、data streamを出力へ含めない。先頭音声streamが存在しない、正のdurationを取得できない、または読取りに失敗した場合は生成しない。
+
+Pythonはshellを介さず、設定から渡された検証済みFFmpeg／ffprobe実行ファイルと引数配列を使用する。開発時は既存のローカル `/opt/homebrew/bin/ffmpeg` と `/opt/homebrew/bin/ffprobe` を使用し、Release設定は空のままとする。この開発時配置を配布時の配置・同梱方式へ昇格させない。
+
+生成先はworkspace直下の固定 `.partial/analysis_<request_id>.wav.partial` とし、FFmpegへ `-nostdin`、既存出力を上書きしない指定、明示的なWAV formatを渡す。FFmpeg終了コード0だけで成功扱いせず、通常ファイル、非symlink、非空、WAV header、16,000 Hz、1 channel、sample幅2 byte、非圧縮PCM、正のframe数と整数ミリ秒durationをPython標準ライブラリで再読込み検証する。
+
+正式な再利用根拠は `analysis.wav` と `analysis_audio.json` の一組とする。metadata schema version 1は、`job_id`、`source_fingerprint`、固定変換profile、選択stream index、frame数、整数ミリ秒durationを余分な項目なしで持つ。Source fingerprint全項目とjob IDが正式 `job.json` に一致し、profileとWAV実体を再検証できる場合だけ再利用する。一方だけ存在する、partialだけ存在する、schema不明、内容不一致、symlinkまたは未知項目がある場合は再利用しない。
+
+正式化は、両partialの書込完了、flush／fsync、再読込み検証後に、`analysis_audio.json`、最後に成功commit markerとなる `analysis.wav` の順で同一volume renameし、directory fsync後に両方を再検証する。正式化途中で一方だけ残った既知の派生成果物は、正式lock下で通常ファイル・非symlink・固定名を再確認した場合だけ個別unlinkして最初から生成し直す。再帰削除、glob、未知項目削除を行わない。
+
+変換前にSource fingerprintを再計算し、変換後・正式化前にも再計算する。途中変更、不一致、読取不能ではpartialを正式化しない。必要空き容量は、ffprobeの正のdurationから算出した理論PCM byte数にWAV header用1 MiBを加えた値以上とし、不足時はFFmpegを起動しない。この1 MiBはファイル形式上の保守的な検証値であり、保存機能の容量契約へ転用しない。
+
+error codeは `analysis_audio_busy`、`analysis_audio_job_invalid`、`analysis_audio_source_unavailable`、`analysis_audio_source_changed`、`analysis_audio_probe_failed`、`analysis_audio_duration_invalid`、`analysis_audio_insufficient_space`、`analysis_audio_ffmpeg_failed`、`analysis_audio_invalid`、`analysis_audio_finalization_failed`、`analysis_audio_reuse_invalid`、`analysis_audio_protocol_error` とする。実ストレージ切断は未検証とし、読取不能・書込不能を安全に失敗させる自動試験と区別する。
 
 ### 8.5 スリープ抑止
 
