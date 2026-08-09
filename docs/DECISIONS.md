@@ -867,3 +867,40 @@
 ### Gate判定
 
 第9開始に必要な状態、所有権、job schema、fingerprint、排他、stale停止要求、削除境界、通信成功条件を正本化したため、第9開始Gateを通過済みとする。第9本体は未実装であり、完了扱いにしない。
+
+---
+
+## 2026-08-09：第9段階実装・検証
+
+### 対象Stage
+
+第9段階「current_job、排他、正式通信基盤」
+
+### 実装内容
+
+- Swiftの単一Serviceから、固定Application Support workspaceを対象にPython runnerをshellなし・引数配列で起動する。
+- schema version 1の`job.json`を厳密検証し、Swiftが内容を要求し、正式lockを保持するPython runnerがpartial、flush、fsync、同一volume rename、再読込み検証で永続化する。
+- 元動画の全byte SHA-256とbyte数をSwiftとPythonの双方で照合し、計算前後の変更または復旧時の不一致を安全に拒否する。
+- 非待機`fcntl.flock`で同時取得を1件に制限し、正式jobが存在する二重要求も既存jobを置換せず拒否する。
+- active状態の旧jobを実行中と推測せず`recovery_required`へ移し、元動画不一致は`failed/source_changed`とする。
+- job状態と一致しない正しい`stop.requested`だけをstaleとして個別unlinkし、壊れたmarker、symlink、未知workspace項目は削除せずfail-closedとする。
+- `job_lock`から`job_ready`の順序、共通フィールド、sequence、terminal、exit、stdout／stderr EOFを厳密検証するJSON Lines通信を実装する。
+
+### 検証結果
+
+- Python構文検査が成功した。
+- Python単体テスト20件が成功し、そのうち第9段階7件でjob正式化、二重要求、lock競合、復旧、Source fingerprint不一致、stale停止要求、未知項目、subprocess JSON Linesを確認した。
+- DebugビルドとSwift単体テスト全55件が成功した。そのうち第9段階5件で、全体fingerprint、job作成と二重拒否、復旧状態、元動画変更、無効人物選択、protocol violationを確認した。
+- 一時テスト領域の親symlinkを正式検証が拒否したため、テストだけを非symlinkの`/private/tmp`へ修正し、製品側の検証条件は弱めていない。
+
+### 未決定・後続へ残す事項
+
+- VAD、解析用WAV、人物判定、品質判定、結果正式化、保存は未実装とする。
+- 実解析中に同じrunnerが全子プロセス終了と終了後検証までlockを保持する本接続は、各後続処理を接続する段階で行う。
+- 有効な停止要求の作成、signal、猶予時間、強制終了、Process group、停止完了表現は第14開始Gateまで未決定とする。
+- スリープ抑止の具体方式、App Sandboxと完成版filesystemでの最終成立性は第22開始Gateまで未決定・未検証とする。
+- DebugのPython絶対パスは開発時構成であり、配布時のPython配置・同梱方式を確定しない。
+
+### Stage判定
+
+二重解析拒否、クラッシュ後の実行中誤表示防止、fingerprint不一致時の再利用禁止を自動検証し、全テストと差分監査に成功したため、第9段階を完了とする。

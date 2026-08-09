@@ -24,6 +24,8 @@
 	<string>$(CHARACTER_REGISTRATION_MODEL_DIRECTORY)</string>
 	<key>CharacterRegistrationPythonExecutable</key>
 	<string>$(CHARACTER_REGISTRATION_PYTHON_EXECUTABLE)</string>
+	<key>AnalysisJobPythonExecutable</key>
+	<string>$(ANALYSIS_JOB_PYTHON_EXECUTABLE)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
 	<key>PreflightFFprobeExecutable</key>

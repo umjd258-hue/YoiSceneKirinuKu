@@ -50,7 +50,7 @@ Python側は主に以下を担当する。
 
 | ファイル | 作成・更新 | 読取 | 削除 |
 |---|---|---|---|
-| `job.json` | Swift | Python | Swift |
+| `job.json` | Swift（内容・状態遷移。Python runnerがlock下で原子的に永続化） | Python | Swift |
 | `stop.requested` | Swift | Python | Swift |
 | `analysis.wav` | Python | Python | Swift |
 | `vad.json` | Python | Python | Swift |
@@ -281,7 +281,7 @@ current_job/
 - 準備・通信・process・永続化の失敗は `failed` とする。ただし、アプリ起動時に旧jobがactive状態のまま正式lock所有者を確認できない場合は、推測で失敗または実行中にせず `recovery_required` とする。
 - `recovery_required` からの再開は、排他取得、Source fingerprint一致、stale停止要求処理、各正式成果物のschema検証をすべて満たす場合だけ許可する。未実装の後続成果物を再利用しない。
 
-`job.json` はSwiftだけが作成・更新し、トップレベルを次の必須項目だけに限定する。
+`job.json` の内容と状態遷移はSwiftが要求し、正本契約で固定した復旧監査結果だけは正式lockを保持するPython runnerが判定する。物理的なファイル作成・更新はrunnerが、Swiftから受け取って厳密検証したdocument、または契約どおりの復旧遷移だけを原子的に永続化する。Pythonがそれ以外の状態や入力を独自に決定してはならない。トップレベルは次の必須項目だけに限定する。
 
 ```json
 {
@@ -304,7 +304,7 @@ current_job/
 }
 ```
 
-`job_id` と `start_request_id`、`source`、`selected_character_ids` は作成後に変更しない。`selected_character_ids` は1件以上で重複を許さない。Swiftが更新できるのは `state_revision`、`state`、`failure_code` だけとし、更新ごとにrevisionを1増やす。`failure_code` は `failed` の場合だけ安定error code文字列、それ以外はnullとする。全項目と入れ子objectは余分な項目を拒否する。Swiftは固定 `.partial/job_<request_id>.json.partial` へ排他的に書き、flush、fsync、再読込み検証後に `job.json` へ同一volume renameし、正式ファイルも再読込み検証する。
+`job_id` と `start_request_id`、`source`、`selected_character_ids` は作成後に変更しない。`selected_character_ids` は1件以上で重複を許さない。Swiftが更新を指示できるのは `state_revision`、`state`、`failure_code` だけとし、更新ごとにrevisionを1増やす。`failure_code` は `failed` の場合だけ安定error code文字列、それ以外はnullとする。全項目と入れ子objectは余分な項目を拒否する。Python runnerは固定 `.partial/job_<request_id>.json.partial` へ排他的に書き、flush、fsync、再読込み検証後に `job.json` へ同一volume renameし、正式ファイルも再読込み検証する。
 
 ### 8.2 Source fingerprint
 
