@@ -56,6 +56,7 @@ Python側は主に以下を担当する。
 | `analysis_audio.json` | Python | Python・Swift | Python（第10の不完全な既知pair）・Swift |
 | `vad.json` | Python | Python | Swift |
 | `speaker_candidates.json` | Python | Python | Swift |
+| `speaker_matches.json` | Python | Python | Swift |
 | `result.json` | Python | Swift | Swift |
 | `selection.json` | Swift | Swift | Swift |
 | `save_state.json` | Python | Swift | Swift |
@@ -375,6 +376,24 @@ partialは固定`.partial/vad_<request_id>.json.partial`と`.partial/speaker_can
 進捗は`stage: candidate_generation`で`running`、`vad_completed`、`completed`の順とする。安定error codeは`candidate_busy`、`candidate_job_invalid`、`candidate_input_unavailable`、`candidate_vad_failed`、`candidate_vad_invalid`、`candidate_generation_failed`、`candidate_finalization_failed`、`candidate_reuse_invalid`、`candidate_protocol_error`とする。`finished`、正常exit、両EOFだけでは成功扱いせず、正式pairの再読込み検証を必須とする。
 
 人工区間比較では、balanced profileが400ms gapを結合し800ms gapを分離し、端点拡張、65秒区間の非重複分割、0件、UUIDv5再現、重複入力拒否に成功した。実会話での体感品質は未検証であり、人物一致・音声品質・保存MP4切出しの閾値へ転用しない。実測詳細は`experiments/candidate-intervals/RESULTS.md`を参照する。
+
+### 8.9 第13段階の候補Embedding・人物比較契約
+
+第13段階は、正式`analysis.wav`と`speaker_candidates.json`を再検証し、候補区間の16,000 Hz mono PCM sampleだけをメモリ内tensorへ変換してSpeaker Embeddingを生成する。候補ごとのEmbeddingは192要素float32、全要素有限、L2正規化済みでなければならない。候補Embedding自体は永続化せず、後段で必要な人物比較結果だけを`speaker_matches.json` schema version 1へ保存する。
+
+比較対象は正式`job.json`の`selected_character_ids`に含まれる人物だけとする。各選択人物について、正式`character.json`と全`sample.json`、元`source.wav` fingerprint、192要素float32のL2正規化`embedding.npy`を厳密に再検証し、第6節の算術平均後再L2正規化規則でcentroidをメモリ内に再計算する。非選択人物の資産は読まず、比較もしない。候補が非選択人物に一致するかは推測せず、選択人物との比較結果だけを第15段階へ渡す。
+
+`speaker_matches.json`の必須fieldは`schema_version`、`job_id`、`speaker_candidates_fingerprint`、`model`、`selected_characters`、`candidates`とする。`speaker_candidates_fingerprint`は正式`speaker_candidates.json`の`algorithm: "sha256"`、`byte_count`、`digest`を持つ。`model`は`model_id: "speechbrain/spkrec-ecapa-voxceleb"`、固定revision、`dimension: 192`、`dtype: "float32"`、`normalization: "l2"`を持つ。`selected_characters`はjobの順序を維持し、各人物について`character_id`と、centroid入力となる時刻順の`sample_id`・`embedding.npy`全byte SHA-256を持つ。これを人物資産変更時の再利用拒否根拠とする。
+
+各candidateは正式候補と同じ`candidate_id`を1回だけ持ち、`comparisons`には選択人物全件をjob順で格納する。各比較は`character_id`と有限なJSON numberの`cosine_similarity`を持ち、範囲は-1以上1以下とする。これはPython内部の後段判定材料であり、本人確率ではない。SwiftのUI model、progress、error、通常ログへ値を渡さない。最高人物、人物不明、人物一致閾値、表示段階は第15開始Gateまで決定・永続化しない。候補0件は空の`candidates`を持つ正常成果物とする。
+
+開発時は第8A／第8Bと同じDebug設定から注入したローカルPython virtualenvとモデルディレクトリを使用し、固定model ID・revisionと必要ファイルを起動前および処理時に検証する。Release設定は空のままとし、実行中のdownloadを禁止する。完成版Python・SpeechBrain・PyTorch・AIモデルの配置／同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。この繰延べは第13の開発時実装へローカル絶対パスを固定する決定ではない。
+
+partialは固定`.partial/speaker_matches_<request_id>.json.partial`だけを使用する。書込、flush、fsync、厳密再読込み後に同一volumeで`speaker_matches.json`へrenameし、directory fsync後に正式入力・人物fingerprintとの一致を再検証する。全fingerprint、model、選択人物・sample構成が一致する場合だけ再利用する。partialだけ、未知schema、不一致、symlink、非選択人物の混入、欠落比較、非有限scoreはfail-closedとする。
+
+進捗は`stage: speaker_matching`で`running`、候補処理中の`processing`、`completed`の順とする。`processing`は`completed_count`と`total_count`だけを持ち、生スコアを含めない。安定error codeは`speaker_matching_busy`、`speaker_matching_job_invalid`、`speaker_matching_input_unavailable`、`speaker_matching_candidates_invalid`、`speaker_matching_character_invalid`、`speaker_matching_model_unavailable`、`speaker_matching_embedding_failed`、`speaker_matching_embedding_invalid`、`speaker_matching_finalization_failed`、`speaker_matching_reuse_invalid`、`speaker_matching_protocol_error`とする。
+
+人工合成音声の既存技術検証では、同じ固定モデルで3〜30秒の16kHz mono入力から再現可能な192次元有限L2正規化Embeddingを生成し、複数sample centroidとcosine similarityを算出できた。これは生成・比較方式の成立性だけを支持し、実人物の識別精度、人物一致閾値、人物不明判定、UI表示へ一般化しない。実測詳細は`experiments/speaker-embedding/RESULTS.md`を参照する。
 
 ### 8.5 スリープ抑止
 

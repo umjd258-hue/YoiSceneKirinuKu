@@ -785,6 +785,8 @@ VAD結果から、後段の人物判定と品質判定が共通して使用す�
 - 選択人物だけを比較対象とする範囲と、非選択人物に一致した場合の扱いを決定する。
 - AI生スコアを永続成果物へ保持する場合の内部限定範囲を決定する。UIへ出さない。
 
+2026-08-09、既存の人工合成音声によるSpeaker Embedding技術検証と`ARCHITECTURE.md`第8.9節への正本化により、第13開始Gateは通過済みとする。候補Embeddingの生成・検証、選択人物だけとのcentroid比較、非選択人物を読まない規則、内部限定のcosine similarity、`speaker_matches.json` schema・fingerprint・正式化・再利用、進捗、error code、Debug時モデル配置を決定した。人物一致閾値、人物不明、表示変換、実人物精度、完成版同梱、App Sandboxは対応する後続Gateまで未決定とし、第13本体の完了を意味しない。
+
 ## 今回の目的
 
 候補ごとにSpeaker Embeddingを算出し、選択人物との人物判定用内部結果を作る。

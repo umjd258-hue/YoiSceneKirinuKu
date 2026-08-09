@@ -1218,3 +1218,44 @@ schema、正式化・再利用、生成数値、境界、安定ID、所有権、
 ### Stage判定
 
 第12固有の実装、Debugビルド、Python全テスト、第12固有Swiftテスト、差分検査が成功し、既存Swiftテストの停止が第12変更の実行経路外であることを切り分けたため、第12段階を完了とする。Swift全体テスト完走およびXcodeテスト環境問題の解消を意味しない。
+
+---
+
+## 2026-08-09：第13開始Gateの候補Embedding・人物比較契約
+
+### 対象Stage
+
+第13段階「Speaker Embeddingと人物判定」開始Gate
+
+### 確認済み事項
+
+- 既存の人工合成音声技術検証で、固定モデルにより3〜30秒の16kHz mono入力から再現可能な192次元float32・有限・L2正規化Embeddingを生成できた。
+- 同じモデル・revisionの複数sample Embeddingから再L2正規化centroidを構成し、候補Embeddingとのcosine similarityを算出できた。
+- 無音でも有限Embeddingを返し得るため、Embedding生成成功を音声品質や人物一致の成功へ読み替えてはいけないことを確認済みである。
+
+### 決定事項
+
+- 候補区間は正式`analysis.wav`からメモリ内tensorとして読み、登録sampleと同じ固定モデル・revisionで192次元L2正規化Embeddingを生成する。候補Embedding自体は永続化しない。
+- 比較対象は正式`job.json`の選択人物だけとし、全sampleを厳密検証してcentroidを都度再計算する。非選択人物の資産は読まず、非選択人物との一致を推測しない。
+- Python内部の後段入力として`speaker_matches.json` schema version 1を所有し、正式候補、モデル、選択人物sample構成をfingerprintで結び付ける。
+- 各候補について選択人物全件との有限なcosine similarityだけを内部保存する。本人確率、最高人物、人物不明、表示段階は保存せず、Swift UIへ生スコアを渡さない。
+- partial、fsync、rename、正式再検証、厳密再利用、進捗、安定error codeは`ARCHITECTURE.md`第8.9節を正本とする。
+- 開発時は既存Debug設定からローカルPython virtualenvとモデルを注入し、Release設定は空、実行中downloadは禁止とする。
+
+### 理由
+
+- 候補Embeddingを永続化せず比較結果だけを保持すると、再生成可能な派生ファイルと清掃対象を増やさず、第15段階に必要な内部材料を残せる。
+- 選択人物だけを読むことで解析対象をjob要求と一致させ、非選択人物を暗黙の識別候補へ加えない。
+- 人物資産のsample fingerprintを再利用条件へ含めれば、sample追加・再生成後にstaleな比較結果を正式成果物として扱わない。
+- 既存技術検証は生成・比較の成立性には十分だが、実人物閾値や完成版配置の決定材料には不足するため、責務別に後続Gateへ残す。
+
+### 未決定・未検証事項
+
+- 人物一致閾値、人物不明判定、人物一致表示変換は第15開始Gateまで未決定とする。
+- 実人物、雑音、残響、複数話者、マイク・端末差での識別精度は未検証とする。
+- 音声品質判定と◎／○／△は第15開始Gateまで独立した未決定事項とする。
+- 完成版Python、SpeechBrain、PyTorch、モデルの配置・同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
+
+### Gate判定
+
+解析候補Embedding、選択人物比較、内部score範囲、正式中間成果物、再利用、開発時モデル配置を正本化したため、第13開始Gateを通過済みとする。第13本体は未実装であり、完了扱いにしない。
