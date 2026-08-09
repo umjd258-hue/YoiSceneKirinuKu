@@ -1130,3 +1130,47 @@
 ### 判定
 
 最終再検証で新しい問題はなく、第11段階は完了状態を維持する。後続Gate事項を検証済みまたは本番仕様へ変更していない。
+
+---
+
+## 2026-08-09：第12開始Gateの候補区間検証と正式決定
+
+### 対象Stage
+
+第12段階「候補区間生成」開始Gate
+
+### 決定事項
+
+- `vad.json`と`speaker_candidates.json`をPython所有の厳密なschema version 1として正式化する。
+- `vad.json`は正式解析音声pairの全byte SHA-256とbyte数、VAD profile、音声長、整数ミリ秒区間を持つ。
+- `speaker_candidates.json`は正式`vad.json` fingerprint、生成profile、安定候補ID、整数ミリ秒区間を持つ。
+- 500ms以下のVAD gapを結合し、前後各250msを加える。候補は原則3,000〜30,000msとし、短区間は範囲内で拡張、長区間はoverlapなしで分割する。
+- 動画全体が3,000ms未満の場合とVAD 0件は候補0件の正常成果物とする。
+- 候補IDはjob UUIDをnamespace、`candidate:v1:<start_ms>:<end_ms>`をnameとするUUIDv5へ`candidate_`を付ける。
+- partial、正式化順序、厳密再利用、進捗、安定error codeを`ARCHITECTURE.md`第8.8節のとおり確定する。
+
+### 理由
+
+- 第8A技術検証で3〜30秒はEmbedding入力の限定的な安定傾向と処理上限として採用済みであり、未検証の別範囲を増やさず再利用できる。
+- 人工区間比較でbalanced方式だけが400msの短い間を結合し、800msの間を別候補として維持した。
+- UUIDv5をjobと確定区間から生成すれば、同じ正式入力と契約でIDを再現でき、配列位置や表示名へ依存しない。
+- VADと候補成果物をfingerprintで連結し、候補側を最後のcommit markerにすることで、不完全なpairを完成扱いしない。
+
+### 検証結果
+
+- compact、balanced、broadを、0件、400ms／800ms gap、動画両端の短区間、2秒短尺、65秒長区間、重複入力で比較した。
+- balancedは期待した結合・分離、3秒への端点拡張、30秒以下の非重複分割、短尺0件を満たした。
+- 同一入力の3回再実行で候補配列とUUIDv5が一致し、重複VAD入力を拒否した。
+- 既存Pythonテスト35件とDebug構成のSwift単体テスト61件はすべて成功した。
+- `git diff --check`に問題はなかった。
+
+### 未決定・未検証事項
+
+- 実人物会話における500ms gap、250ms余白、3〜30秒候補の体感品質は未検証とする。
+- 候補Embedding、人物判定、人物不明、品質判定、`result.json`は後続Gateへ残す。
+- 保存MP4の切出し境界とcandidate境界の関係は第19開始Gateまで未決定とする。
+- App Sandboxと配布時Python配置は第22開始Gateまで未決定とする。
+
+### Gate判定
+
+schema、正式化・再利用、生成数値、境界、安定ID、所有権、進捗、error codeを正本化したため、第12開始Gateを通過済みとする。第12本体は未実装であり、完了扱いにしない。

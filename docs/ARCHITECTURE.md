@@ -358,6 +358,24 @@ JSON Linesの`progress`は`stage: vad`と`status: running`／`completed`を順�
 
 人工tone・noiseを使った限定比較では、Python frame RMS方式とFFmpeg `silencedetect`が全ケースに一致し、Python方式は同じ2秒入力で約1.1〜1.3ms、FFmpeg方式は約20〜22msだった。`torchaudio.functional.vad`は全activity区間を返すAPIではなく今回の責務に不適合だった。実人物、BGM、SE、残響、複数話者での検出精度は未検証であり、この条件を人物一致、音声品質、候補生成の閾値へ転用しない。実測詳細は`experiments/vad-candidates/RESULTS.md`を参照する。
 
+### 8.8 第12段階のVAD・候補成果物契約
+
+第12段階は、第11契約のVAD処理結果を`vad.json` schema version 1として初めて永続化し、そこから`speaker_candidates.json` schema version 1を生成する。両JSONはPythonが作成・更新・検証し、Swiftは更新しない。すべてUTF-8、余分なfieldなしの厳密JSONとし、配列順序は開始時刻昇順、区間は非重複の半開区間`[start_ms, end_ms)`とする。
+
+`vad.json`の必須fieldは`schema_version`、`job_id`、`analysis_audio_fingerprint`、`profile`、`audio_duration_ms`、`segments`とする。`analysis_audio_fingerprint`は`algorithm: "sha256"`、`wav_byte_count`、`wav_digest`、`metadata_byte_count`、`metadata_digest`を持ち、正式`analysis.wav`と`analysis_audio.json`それぞれのbyte数と全byte SHA-256を記録する。`profile`は`frame_ms: 30`、`threshold_millidecibels: -45000`、`minimum_activity_ms: 90`とする。各segmentは`start_ms`、`end_ms`、`duration_ms`を持ち、`duration_ms == end_ms - start_ms`、90ms以上、`0 <= start_ms < end_ms <= audio_duration_ms`を必須とする。0件配列は正常な正式成果物とする。
+
+`speaker_candidates.json`の必須fieldは`schema_version`、`job_id`、`vad_fingerprint`、`generation_profile`、`candidates`とする。`vad_fingerprint`は`algorithm: "sha256"`、`byte_count`、`digest`を持ち、正式`vad.json`のbyte数と全byte SHA-256を記録する。`generation_profile`は`merge_gap_ms: 500`、`padding_before_ms: 250`、`padding_after_ms: 250`、`minimum_duration_ms: 3000`、`maximum_duration_ms: 30000`、`split_overlap_ms: 0`とする。各candidateは`candidate_id`、`start_ms`、`end_ms`、`duration_ms`を持ち、範囲、順序、非重複、長さ、IDの一意性を厳密検証する。0件配列を正常とする。
+
+候補生成は、隣接VAD区間のgapが500ms以下なら結合し、その後に前後各250msを加えて`0...audio_duration_ms`へclampする。3,000ms未満は中心基準で拡張し、動画端へ達した分を反対側へ移す。拡張後に接触または重複した区間はunionする。30,000ms超はoverlapなしで時刻順に分割し、最後が3,000ms未満になる場合は直前の分割点を前へ移して両方を範囲内にする。動画全体が3,000ms未満なら候補0件とする。候補同士の追加余白、人物・品質に基づく再結合は行わない。
+
+`candidate_id`は`candidate_`に小文字canonical UUIDv5を続ける。namespaceはcanonical `job_id` UUID、nameはUTF-8の`candidate:v1:<start_ms>:<end_ms>`とする。同一job、同一schema・profile、同一区間から同じIDを再生成し、一度正式化したIDを別区間へ再利用しない。
+
+partialは固定`.partial/vad_<request_id>.json.partial`と`.partial/speaker_candidates_<request_id>.json.partial`だけを使用する。書込、flush、fsync、再読込み検証後に`vad.json`、最後に第12完了markerとなる`speaker_candidates.json`の順で同一volume renameし、directory fsync後にpairを再検証する。正式`vad.json`だけが残り、入力fingerprintとprofileが一致する場合は候補だけを再生成できる。両方が厳密に一致する場合だけ再利用する。候補だけ、未知schema、不一致、symlink、未知項目は推測復旧せずfail-closedとする。既知のstale partialだけを正式lock下で個別unlinkできる。
+
+進捗は`stage: candidate_generation`で`running`、`vad_completed`、`completed`の順とする。安定error codeは`candidate_busy`、`candidate_job_invalid`、`candidate_input_unavailable`、`candidate_vad_failed`、`candidate_vad_invalid`、`candidate_generation_failed`、`candidate_finalization_failed`、`candidate_reuse_invalid`、`candidate_protocol_error`とする。`finished`、正常exit、両EOFだけでは成功扱いせず、正式pairの再読込み検証を必須とする。
+
+人工区間比較では、balanced profileが400ms gapを結合し800ms gapを分離し、端点拡張、65秒区間の非重複分割、0件、UUIDv5再現、重複入力拒否に成功した。実会話での体感品質は未検証であり、人物一致・音声品質・保存MP4切出しの閾値へ転用しない。実測詳細は`experiments/candidate-intervals/RESULTS.md`を参照する。
+
 ### 8.5 スリープ抑止
 
 長時間の解析・保存中は意図しないidle sleepによる中断を避ける必要がある。ただし第9段階は実解析を行わないため、スリープ抑止を実装しない。具体API、開始・解除・異常終了時の最終契約、App Sandbox下の挙動は第22開始Gateで正式決定する。採用時はServiceが長時間処理開始直前に取得し、全子プロセス終了と状態検証後に正常・失敗・停止の全経路で解除するものとし、Viewの寿命には結び付けない。
@@ -468,7 +486,7 @@ Pythonは安定したエラーコードを返し、Swift側がユーザー向け
 - partialしかない工程は再開時に未完成として扱う。
 - 保存先切断などで残ったpartialを完成MP4として扱わない。
 
-候補区間生成、結合、分割に必要な数値規則は未決定とし、第12開始前までに技術検証結果をもとに正式決定する。
+候補区間生成、結合、分割、境界、ID、永続化規則は第8.8節を正本とする。
 
 人物不明判定、人物一致度の段階表現、音声品質から◎・○・△への変換、品質reason codeは未決定とし、第15開始前までに正式決定する。AIの生スコアをUIへ渡さない。
 
