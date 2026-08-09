@@ -34,6 +34,8 @@
 	<string>$(ANALYSIS_AUDIO_PYTHON_EXECUTABLE)</string>
 	<key>VADPythonExecutable</key>
 	<string>$(VAD_PYTHON_EXECUTABLE)</string>
+	<key>CandidateGenerationPythonExecutable</key>
+	<string>$(CANDIDATE_GENERATION_PYTHON_EXECUTABLE)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
 	<key>PreflightFFprobeExecutable</key>

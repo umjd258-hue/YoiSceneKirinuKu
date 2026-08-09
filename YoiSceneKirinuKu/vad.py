@@ -143,7 +143,10 @@ def process(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
         current = workspace / "current_job"
         if not current.is_dir() or current.is_symlink():
             raise VADFailure("vad_job_invalid")
-        allowed = {"job.json", "stop.requested", "analysis.wav", "analysis_audio.json"}
+        allowed = {
+            "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
+            "vad.json", "speaker_candidates.json",
+        }
         if {item.name for item in current.iterdir()} - allowed:
             raise VADFailure("vad_job_invalid")
         try:

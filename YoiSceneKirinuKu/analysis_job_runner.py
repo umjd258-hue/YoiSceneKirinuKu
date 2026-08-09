@@ -243,7 +243,11 @@ def recover_job(workspace: Path) -> dict[str, Any]:
     current = workspace / "current_job"
     if not current.is_dir() or current.is_symlink():
         raise JobFailure("job_not_found")
-    if {item.name for item in current.iterdir()} - {"job.json", "stop.requested"}:
+    allowed = {
+        "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
+        "vad.json", "speaker_candidates.json",
+    }
+    if {item.name for item in current.iterdir()} - allowed:
         raise JobFailure("job_workspace_invalid")
     path = current / "job.json"
     job = validate_job(read_json(path, "job_invalid"))
