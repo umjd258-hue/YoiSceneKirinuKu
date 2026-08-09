@@ -20,7 +20,9 @@ struct RootView: View {
             )
         case .analysis:
             AnalysisView(
-                onOpenResults: appViewModel.navigateToResults,
+                state: appViewModel.analysisState,
+                onRequestStop: appViewModel.requestAnalysisStop,
+                onResume: appViewModel.resumeAnalysis,
                 onReturnHome: appViewModel.returnHome
             )
         case .results:

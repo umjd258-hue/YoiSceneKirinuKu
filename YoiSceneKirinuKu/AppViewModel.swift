@@ -61,17 +61,78 @@ struct HomeState: Equatable {
     }
 }
 
+enum AnalysisStep: Int, CaseIterable, Identifiable, Equatable {
+    case prepareVideo
+    case findSpeech
+    case identifyCharacters
+    case evaluateAudioQuality
+    case organizeResults
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .prepareVideo: "動画を準備"
+        case .findSpeech: "発話を探す"
+        case .identifyCharacters: "人物を確認"
+        case .evaluateAudioQuality: "音声品質を確認"
+        case .organizeResults: "結果を整理"
+        }
+    }
+}
+
+enum AnalysisProgressValue: Equatable {
+    case count(completed: Int, total: Int)
+    case time(completedMilliseconds: Int64, totalMilliseconds: Int64)
+
+    var displayText: String {
+        switch self {
+        case .count(let completed, let total):
+            "\(completed) / \(total)"
+        case .time(let completedMilliseconds, let totalMilliseconds):
+            "\(Self.format(milliseconds: completedMilliseconds)) / \(Self.format(milliseconds: totalMilliseconds))"
+        }
+    }
+
+    private static func format(milliseconds: Int64) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return "\(seconds / 60)分\(seconds % 60)秒"
+    }
+}
+
+struct AnalysisProgress: Equatable {
+    let step: AnalysisStep
+    let value: AnalysisProgressValue
+}
+
+enum AnalysisState: Equatable {
+    case running(progress: AnalysisProgress)
+    case stopRequested
+    case stopped(resumeProgress: AnalysisProgress?)
+
+    static let initial = AnalysisState.running(progress: AnalysisProgress(
+        step: .identifyCharacters,
+        value: .count(completed: 42, total: 128)
+    ))
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var route: AppRoute = .home
     @Published private(set) var homeState: HomeState
     @Published private(set) var draftCharacterIDs: Set<UUID>?
+    @Published private(set) var analysisState: AnalysisState
     private let preflightService: any PreflightServicing
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
 
-    init(homeState: HomeState = .initial, preflightService: any PreflightServicing = PreflightService()) {
+    init(
+        homeState: HomeState = .initial,
+        analysisState: AnalysisState = .initial,
+        preflightService: any PreflightServicing = PreflightService()
+    ) {
         self.homeState = homeState
+        self.analysisState = analysisState
         self.preflightService = preflightService
     }
 
@@ -121,6 +182,34 @@ final class AppViewModel: ObservableObject {
 
     func cancelCharacterSelection() {
         draftCharacterIDs = nil
+    }
+
+    func updateAnalysisProgress(_ progress: AnalysisProgress) {
+        guard route == .analysis, case .running = analysisState else { return }
+        analysisState = .running(progress: progress)
+    }
+
+    @discardableResult
+    func requestAnalysisStop() -> Bool {
+        guard route == .analysis, case .running = analysisState else { return false }
+        analysisState = .stopRequested
+        return true
+    }
+
+    @discardableResult
+    func confirmAnalysisStopped(resumeProgress: AnalysisProgress?) -> Bool {
+        guard route == .analysis, case .stopRequested = analysisState else { return false }
+        analysisState = .stopped(resumeProgress: resumeProgress)
+        return true
+    }
+
+    @discardableResult
+    func resumeAnalysis() -> Bool {
+        guard route == .analysis,
+              case .stopped(let resumeProgress) = analysisState,
+              let resumeProgress else { return false }
+        analysisState = .running(progress: resumeProgress)
+        return true
     }
 
     private func apply(_ outcome: PreflightOutcome, requestID: UUID) {

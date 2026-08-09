@@ -249,6 +249,85 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(subject.homeState.characters, .unregistered)
     }
 
+    func testAnalysisProgressSupportsEveryFixedStep() {
+        let subject = AppViewModel(homeState: analysisReadyHome)
+        XCTAssertTrue(subject.navigateToAnalysis())
+
+        for (index, step) in AnalysisStep.allCases.enumerated() {
+            let progress = AnalysisProgress(
+                step: step,
+                value: .count(completed: index + 1, total: AnalysisStep.allCases.count)
+            )
+            subject.updateAnalysisProgress(progress)
+            XCTAssertEqual(subject.analysisState, .running(progress: progress))
+        }
+    }
+
+    func testAnalysisProgressFormatsCountAndTimeWithoutPercentage() {
+        XCTAssertEqual(AnalysisProgressValue.count(completed: 42, total: 128).displayText, "42 / 128")
+        XCTAssertEqual(
+            AnalysisProgressValue.time(completedMilliseconds: 751_000, totalMilliseconds: 1_452_000).displayText,
+            "12分31秒 / 24分12秒"
+        )
+    }
+
+    func testStopRequestAndCompletionAreSeparateExclusiveStates() {
+        let resumeProgress = AnalysisProgress(
+            step: .findSpeech,
+            value: .time(completedMilliseconds: 30_000, totalMilliseconds: 120_000)
+        )
+        let subject = AppViewModel(homeState: analysisReadyHome)
+        XCTAssertTrue(subject.navigateToAnalysis())
+
+        XCTAssertTrue(subject.requestAnalysisStop())
+        XCTAssertEqual(subject.analysisState, .stopRequested)
+        XCTAssertFalse(subject.requestAnalysisStop())
+
+        XCTAssertTrue(subject.confirmAnalysisStopped(resumeProgress: resumeProgress))
+        XCTAssertEqual(subject.analysisState, .stopped(resumeProgress: resumeProgress))
+        XCTAssertFalse(subject.confirmAnalysisStopped(resumeProgress: resumeProgress))
+    }
+
+    func testProgressIsIgnoredAfterStopRequest() {
+        let subject = AppViewModel(homeState: analysisReadyHome)
+        XCTAssertTrue(subject.navigateToAnalysis())
+        XCTAssertTrue(subject.requestAnalysisStop())
+
+        subject.updateAnalysisProgress(AnalysisProgress(
+            step: .organizeResults,
+            value: .count(completed: 128, total: 128)
+        ))
+
+        XCTAssertEqual(subject.analysisState, .stopRequested)
+    }
+
+    func testResumeRequiresVerifiedMockProgress() {
+        let resumableProgress = AnalysisProgress(
+            step: .findSpeech,
+            value: .count(completed: 20, total: 100)
+        )
+        let resumable = AppViewModel(homeState: analysisReadyHome)
+        XCTAssertTrue(resumable.navigateToAnalysis())
+        XCTAssertTrue(resumable.requestAnalysisStop())
+        XCTAssertTrue(resumable.confirmAnalysisStopped(resumeProgress: resumableProgress))
+        XCTAssertTrue(resumable.resumeAnalysis())
+        XCTAssertEqual(resumable.analysisState, .running(progress: resumableProgress))
+
+        let notResumable = AppViewModel(homeState: analysisReadyHome)
+        XCTAssertTrue(notResumable.navigateToAnalysis())
+        XCTAssertTrue(notResumable.requestAnalysisStop())
+        XCTAssertTrue(notResumable.confirmAnalysisStopped(resumeProgress: nil))
+        XCTAssertFalse(notResumable.resumeAnalysis())
+        XCTAssertEqual(notResumable.analysisState, .stopped(resumeProgress: nil))
+    }
+
+    func testStopCannotBeRequestedOutsideAnalysis() {
+        let subject = AppViewModel(homeState: analysisReadyHome)
+
+        XCTAssertFalse(subject.requestAnalysisStop())
+        XCTAssertEqual(subject.analysisState, .initial)
+    }
+
     func testSuccessfulPreflightUpdatesOnlyVideoState() async {
         let result = PreflightResult(
             fileName: "episode01.mp4",

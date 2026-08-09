@@ -192,18 +192,89 @@ private struct HomeCard<Content: View>: View {
 }
 
 struct AnalysisView: View {
-    let onOpenResults: () -> Bool
+    let state: AnalysisState
+    let onRequestStop: () -> Bool
+    let onResume: () -> Bool
     let onReturnHome: () -> Bool
 
     var body: some View {
-        PlaceholderContainer(title: "解析（仮画面）") {
-            Button("結果画面（仮）へ") {
-                onOpenResults()
-            }
-            Button("ホームへ戻る") {
-                onReturnHome()
+        VStack(alignment: .leading, spacing: 24) {
+            switch state {
+            case .running(let progress):
+                runningContent(progress: progress)
+            case .stopRequested:
+                stoppingContent
+            case .stopped(let resumeProgress):
+                stoppedContent(canResume: resumeProgress != nil)
             }
         }
+        .frame(minWidth: 640, minHeight: 520)
+        .padding(32)
+    }
+
+    private func runningContent(progress: AnalysisProgress) -> some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("解析中")
+                .font(.largeTitle.bold())
+            VStack(alignment: .leading, spacing: 6) {
+                Text(progress.step.title)
+                    .font(.title2)
+                Text(progress.value.displayText)
+                    .font(.title3.monospacedDigit())
+            }
+            analysisSteps(currentStep: progress.step)
+            Button("停止") { onRequestStop() }
+                .buttonStyle(.bordered)
+        }
+    }
+
+    private var stoppingContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProgressView()
+            Text("安全に停止しています…")
+                .font(.title2.bold())
+            Text("安全に停止できる状態を確認しています。")
+                .foregroundStyle(.secondary)
+            Button("停止") {}
+                .disabled(true)
+        }
+    }
+
+    private func stoppedContent(canResume: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("解析を停止しました")
+                .font(.title2.bold())
+            Text("完成済みの処理は残っています。")
+                .foregroundStyle(.secondary)
+            if canResume {
+                Button("続きから解析") { onResume() }
+                    .buttonStyle(.borderedProminent)
+            }
+            Button("ホームへ戻る") { onReturnHome() }
+        }
+    }
+
+    private func analysisSteps(currentStep: AnalysisStep) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(AnalysisStep.allCases) { step in
+                Label {
+                    Text(step.title)
+                } icon: {
+                    Image(systemName: iconName(for: step, currentStep: currentStep))
+                        .foregroundStyle(iconColor(for: step, currentStep: currentStep))
+                }
+            }
+        }
+    }
+
+    private func iconName(for step: AnalysisStep, currentStep: AnalysisStep) -> String {
+        if step.rawValue < currentStep.rawValue { return "checkmark.circle.fill" }
+        if step == currentStep { return "circle.fill" }
+        return "circle"
+    }
+
+    private func iconColor(for step: AnalysisStep, currentStep: AnalysisStep) -> Color {
+        step.rawValue <= currentStep.rawValue ? .blue : .secondary
     }
 }
 
