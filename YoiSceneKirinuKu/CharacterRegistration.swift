@@ -18,6 +18,8 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
     case embeddingInvalid = "registration_embedding_invalid"
     case metadataWriteFailed = "registration_metadata_write_failed"
     case finalizationFailed = "registration_finalization_failed"
+    case characterNotFound = "registration_character_not_found"
+    case characterBusy = "registration_character_busy"
     case protocolError = "registration_protocol_error"
 
     var userMessage: String {
@@ -42,12 +44,23 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
             "人物の声を登録できませんでした。"
         case .metadataWriteFailed, .finalizationFailed:
             "人物データを安全に保存できませんでした。"
+        case .characterNotFound:
+            "追加先の人物が見つかりません。"
+        case .characterBusy:
+            "この人物は別の処理で更新中です。"
         }
     }
 }
 
 struct CharacterRegistrationRequest: Equatable, Sendable {
     let displayName: String
+    let sourceURL: URL
+    let startMilliseconds: Int64
+    let endMilliseconds: Int64
+}
+
+struct CharacterSampleAdditionRequest: Equatable, Sendable {
+    let characterID: UUID
     let sourceURL: URL
     let startMilliseconds: Int64
     let endMilliseconds: Int64
@@ -71,6 +84,7 @@ enum CharacterLoadOutcome: Equatable, Sendable {
 
 protocol CharacterRegistrationServicing: Sendable {
     func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome
+    func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome
     func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome
 }
 
@@ -137,6 +151,22 @@ final class CharacterRegistrationService: CharacterRegistrationServicing, @unche
         ]
         let result = await execute(body: body, requestID: requestID, configuration: configuration)
         return CharacterRegistrationProtocolParser.parseLoad(result, requestID: requestID)
+    }
+
+    func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        guard let configuration else { return .failure(.modelUnavailable) }
+        let body: [String: Any] = [
+            "protocol_version": 1,
+            "request_id": requestID.uuidString.lowercased(),
+            "operation": "add_sample",
+            "character_id": "char_\(request.characterID.uuidString.lowercased())",
+            "source_path": request.sourceURL.path,
+            "start_ms": request.startMilliseconds,
+            "end_ms": request.endMilliseconds,
+            "characters_root": configuration.charactersRootURL.path,
+        ]
+        let result = await execute(body: body, requestID: requestID, configuration: configuration)
+        return CharacterRegistrationProtocolParser.parseRegistration(result, requestID: requestID)
     }
 
     private func execute(
@@ -222,9 +252,10 @@ final class CharacterRegistrationService: CharacterRegistrationServicing, @unche
     }
 
     private static func validateExecutable(_ url: URL) -> Bool {
-        url.path.hasPrefix("/")
-            && validateRegularFile(url)
-            && FileManager.default.isExecutableFile(atPath: url.path)
+        guard url.path.hasPrefix("/") else { return false }
+        let resolvedURL = url.resolvingSymlinksInPath()
+        return validateRegularFile(resolvedURL)
+            && FileManager.default.isExecutableFile(atPath: resolvedURL.path)
     }
 
     private static func validateRegularFile(_ url: URL) -> Bool {

@@ -601,6 +601,7 @@ private struct ExistingCharacterSampleAdditionView: View {
 
             HStack {
                 Button(state.phase == .editing ? "キャンセル" : "閉じる") { onCancel() }
+                    .disabled(state.phase == .additionRequested)
                 Spacer()
                 if state.phase == .editing {
                     Button("この音声を追加") { onRequestAddition() }

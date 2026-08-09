@@ -642,44 +642,75 @@ final class AppViewModelTests: XCTestCase {
         subject.updateExistingCharacterSampleCurrentPosition(18_000)
         subject.setExistingCharacterSampleRangeEnd()
         XCTAssertTrue(subject.existingCharacterSampleAddition.canRequestAddition)
-        XCTAssertTrue(subject.requestExistingCharacterSampleAddition())
-        XCTAssertEqual(subject.existingCharacterSampleAddition.phase, .additionRequested)
     }
 
-    func testExistingSampleSuccessAndFailureDoNotChangeExistingData() throws {
-        let successSubject = AppViewModel()
+    func testExistingSampleSuccessChangesCountOnlyAfterFormalReload() async throws {
+        let targetID = UUID(uuidString: "1c87d576-6f98-4e10-bf44-427cadb4e634")!
+        let originalSample = RegisteredAudioSampleSummary(
+            id: UUID(uuidString: "2514fffd-245d-40f2-b215-77949dcc74ae")!,
+            sourceFileName: "source.wav",
+            durationMilliseconds: 7_000
+        )
+        let secondOriginalSample = RegisteredAudioSampleSummary(
+            id: UUID(uuidString: "ab0b7819-e9c6-4208-a583-9eed4a6db4b9")!,
+            sourceFileName: "source.wav",
+            durationMilliseconds: 8_000
+        )
+        let addedSample = RegisteredAudioSampleSummary(
+            id: UUID(uuidString: "b3d820fb-b03d-4bba-ad2e-a573edc02e16")!,
+            sourceFileName: "source.wav",
+            durationMilliseconds: 7_000
+        )
+        let updated = RegisteredCharacter(
+            characterID: targetID,
+            displayName: "コナン",
+            samples: [originalSample, secondOriginalSample, addedSample]
+        )
+        let successSubject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .success(updated),
+            load: .success([updated])
+        ))
         XCTAssertTrue(successSubject.navigateToCharacters())
-        let targetID = try XCTUnwrap(successSubject.characterManagementState.selectedCharacterID)
-        let originalCharacters = successSubject.homeState.registeredCharacters
         let originalSamples = successSubject.characterManagementState.samples(for: targetID)
         prepareValidExistingSampleAddition(successSubject)
         XCTAssertTrue(successSubject.requestExistingCharacterSampleAddition())
-        XCTAssertTrue(successSubject.confirmExistingCharacterSampleAdditionSucceeded())
-        XCTAssertEqual(successSubject.existingCharacterSampleAddition.phase, .succeeded)
-        XCTAssertEqual(successSubject.homeState.registeredCharacters, originalCharacters)
         XCTAssertEqual(successSubject.characterManagementState.samples(for: targetID), originalSamples)
+        XCTAssertFalse(successSubject.requestExistingCharacterSampleAddition())
+        await successSubject.waitForExistingCharacterSampleAdditionForTesting()
 
-        let failureSubject = AppViewModel()
+        XCTAssertEqual(successSubject.existingCharacterSampleAddition.phase, .succeeded)
+        XCTAssertEqual(successSubject.characterManagementState.samples(for: targetID), [originalSample, secondOriginalSample, addedSample])
+    }
+
+    func testExistingSampleFailureDoesNotChangeExistingData() async throws {
+        let failureSubject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.embeddingFailed),
+            load: .success([])
+        ))
         XCTAssertTrue(failureSubject.navigateToCharacters())
         let failureTargetID = try XCTUnwrap(failureSubject.characterManagementState.selectedCharacterID)
         let failureCharacters = failureSubject.homeState.registeredCharacters
         let failureSamples = failureSubject.characterManagementState.samples(for: failureTargetID)
         prepareValidExistingSampleAddition(failureSubject)
         XCTAssertTrue(failureSubject.requestExistingCharacterSampleAddition())
-        failureSubject.confirmExistingCharacterSampleAdditionFailed(message: "Mock failure")
-        XCTAssertEqual(failureSubject.existingCharacterSampleAddition.phase, .failed(message: "Mock failure"))
+        await failureSubject.waitForExistingCharacterSampleAdditionForTesting()
+
+        XCTAssertEqual(failureSubject.existingCharacterSampleAddition.phase, .failed(message: CharacterRegistrationErrorCode.embeddingFailed.userMessage))
         XCTAssertEqual(failureSubject.homeState.registeredCharacters, failureCharacters)
         XCTAssertEqual(failureSubject.characterManagementState.samples(for: failureTargetID), failureSamples)
     }
 
-    func testExistingSampleFailureCanRetryAndCancelWithoutChangingTargetData() throws {
-        let subject = AppViewModel()
+    func testExistingSampleFailureCanRetryAndCancelWithoutChangingTargetData() async throws {
+        let subject = AppViewModel(characterRegistrationService: ImmediateCharacterRegistrationService(
+            registration: .failure(.audioTooQuiet),
+            load: .success([])
+        ))
         XCTAssertTrue(subject.navigateToCharacters())
         let targetID = try XCTUnwrap(subject.characterManagementState.selectedCharacterID)
         let originalSamples = subject.characterManagementState.samples(for: targetID)
         prepareValidExistingSampleAddition(subject)
         XCTAssertTrue(subject.requestExistingCharacterSampleAddition())
-        subject.confirmExistingCharacterSampleAdditionFailed(message: "再試行できます。")
+        await subject.waitForExistingCharacterSampleAdditionForTesting()
 
         XCTAssertTrue(subject.retryExistingCharacterSampleAddition())
         XCTAssertEqual(subject.existingCharacterSampleAddition.phase, .editing)
@@ -900,6 +931,10 @@ private struct ImmediateCharacterRegistrationService: CharacterRegistrationServi
     let load: CharacterLoadOutcome
 
     func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        registration
+    }
+
+    func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
         registration
     }
 

@@ -353,9 +353,12 @@ struct ExistingCharacterSampleAdditionState: Equatable {
         guard let startMilliseconds,
               let endMilliseconds,
               let videoDurationMilliseconds else { return false }
+        let length = endMilliseconds - startMilliseconds
         return startMilliseconds >= 0
             && startMilliseconds < endMilliseconds
             && endMilliseconds <= videoDurationMilliseconds
+            && length >= 3_000
+            && length <= 30_000
     }
 
     var canRequestAddition: Bool {
@@ -383,6 +386,8 @@ final class AppViewModel: ObservableObject {
     private var registrationTask: Task<Void, Never>?
     private var characterReloadTask: Task<Void, Never>?
     private var currentRegistrationRequestID: UUID?
+    private var sampleAdditionTask: Task<Void, Never>?
+    private var currentSampleAdditionRequestID: UUID?
 
     init(
         homeState: HomeState = .initial,
@@ -683,21 +688,50 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func requestExistingCharacterSampleAddition() -> Bool {
-        guard existingCharacterSampleAddition.canRequestAddition else { return false }
+        guard existingCharacterSampleAddition.canRequestAddition,
+              let characterID = existingCharacterSampleAddition.targetCharacterID,
+              let sourceURL = existingCharacterSampleAddition.videoURL,
+              let startMilliseconds = existingCharacterSampleAddition.startMilliseconds,
+              let endMilliseconds = existingCharacterSampleAddition.endMilliseconds else { return false }
+        let previousSampleIDs = Set(characterManagementState.samples(for: characterID).map(\.id))
+        let request = CharacterSampleAdditionRequest(
+            characterID: characterID,
+            sourceURL: sourceURL,
+            startMilliseconds: startMilliseconds,
+            endMilliseconds: endMilliseconds
+        )
+        let requestID = UUID()
+        currentSampleAdditionRequestID = requestID
         existingCharacterSampleAddition.phase = .additionRequested
+        sampleAdditionTask = Task { [weak self, characterRegistrationService] in
+            let outcome = await characterRegistrationService.addSample(request, requestID: requestID)
+            guard !Task.isCancelled else { return }
+            switch outcome {
+            case .success:
+                let reload = await characterRegistrationService.loadCharacters(requestID: UUID())
+                guard !Task.isCancelled else { return }
+                self?.applySampleAddition(
+                    outcome,
+                    reload: reload,
+                    requestID: requestID,
+                    targetCharacterID: characterID,
+                    previousSampleIDs: previousSampleIDs
+                )
+            case .failure:
+                self?.applySampleAddition(
+                    outcome,
+                    reload: nil,
+                    requestID: requestID,
+                    targetCharacterID: characterID,
+                    previousSampleIDs: previousSampleIDs
+                )
+            }
+        }
         return true
     }
 
-    @discardableResult
-    func confirmExistingCharacterSampleAdditionSucceeded() -> Bool {
-        guard existingCharacterSampleAddition.phase == .additionRequested else { return false }
-        existingCharacterSampleAddition.phase = .succeeded
-        return true
-    }
-
-    func confirmExistingCharacterSampleAdditionFailed(message: String) {
-        guard existingCharacterSampleAddition.phase == .additionRequested else { return }
-        existingCharacterSampleAddition.phase = .failed(message: message)
+    func waitForExistingCharacterSampleAdditionForTesting() async {
+        await sampleAdditionTask?.value
     }
 
     @discardableResult
@@ -708,6 +742,8 @@ final class AppViewModel: ObservableObject {
     }
 
     func cancelExistingCharacterSampleAddition() {
+        guard existingCharacterSampleAddition.phase != .additionRequested else { return }
+        currentSampleAdditionRequestID = nil
         existingCharacterSampleAddition = ExistingCharacterSampleAdditionState()
     }
 
@@ -744,6 +780,35 @@ final class AppViewModel: ObservableObject {
             newCharacterRegistration.phase = .failed(message: code.userMessage)
         }
         currentRegistrationRequestID = nil
+    }
+
+    private func applySampleAddition(
+        _ outcome: CharacterRegistrationOutcome,
+        reload: CharacterLoadOutcome?,
+        requestID: UUID,
+        targetCharacterID: UUID,
+        previousSampleIDs: Set<UUID>
+    ) {
+        guard currentSampleAdditionRequestID == requestID,
+              existingCharacterSampleAddition.phase == .additionRequested,
+              existingCharacterSampleAddition.targetCharacterID == targetCharacterID else { return }
+        switch outcome {
+        case .success(let updated):
+            guard updated.characterID == targetCharacterID,
+                  case .success(let characters) = reload,
+                  let reloaded = characters.first(where: { $0.characterID == targetCharacterID }),
+                  Set(reloaded.samples.map(\.id)).isStrictSuperset(of: previousSampleIDs),
+                  reloaded.samples == updated.samples else {
+                existingCharacterSampleAddition.phase = .failed(message: CharacterRegistrationErrorCode.protocolError.userMessage)
+                currentSampleAdditionRequestID = nil
+                return
+            }
+            replaceRegisteredCharacters(with: characters)
+            existingCharacterSampleAddition.phase = .succeeded
+        case .failure(let code):
+            existingCharacterSampleAddition.phase = .failed(message: code.userMessage)
+        }
+        currentSampleAdditionRequestID = nil
     }
 
     private func replaceRegisteredCharacters(with characters: [RegisteredCharacter]) {

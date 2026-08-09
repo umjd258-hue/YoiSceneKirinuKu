@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import fcntl
+import os
 import subprocess
 import tempfile
 import unittest
@@ -71,6 +73,30 @@ class CharacterRegistrationTests(unittest.TestCase):
             "characters_root": str(self.characters),
         }
 
+    def addition_request(self, character_id: str, source: Path | None = None) -> dict:
+        return {
+            "protocol_version": 1,
+            "request_id": str(uuid.uuid4()),
+            "operation": "add_sample",
+            "character_id": character_id,
+            "source_path": str(source or self.source),
+            "start_ms": 1_000,
+            "end_ms": 4_000,
+            "characters_root": str(self.characters),
+        }
+
+    def register_initial_character(self) -> dict:
+        return MODULE.register_character(
+            self.request(), FFMPEG, self.model, SilentEmitter(), embedding_generator=fake_embedding
+        )
+
+    def formal_snapshot(self, character_id: str) -> dict[str, bytes]:
+        root = self.characters / character_id
+        return {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()
+        }
+
     def test_normal_registration_and_reload(self) -> None:
         summary = MODULE.register_character(
             self.request(), FFMPEG, self.model, SilentEmitter(), embedding_generator=fake_embedding
@@ -127,6 +153,58 @@ class CharacterRegistrationTests(unittest.TestCase):
             "operation": "list_characters",
             "characters_root": str(self.characters),
         }), [])
+
+    def test_sample_addition_atomically_extends_formal_character(self) -> None:
+        initial = self.register_initial_character()
+        old_sample_id = initial["samples"][0]["sample_id"]
+        old_sample = self.formal_snapshot(initial["character_id"])
+
+        updated = MODULE.add_sample(
+            self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+            embedding_generator=fake_embedding,
+        )
+
+        self.assertEqual(len(updated["samples"]), 2)
+        self.assertEqual(updated["samples"][0]["sample_id"], old_sample_id)
+        current = self.formal_snapshot(initial["character_id"])
+        for path, contents in old_sample.items():
+            if path != "character.json":
+                self.assertEqual(current[path], contents)
+        self.assertEqual(list((self.characters / ".partial").glob("update_*")), [])
+
+    def test_sample_addition_embedding_failure_preserves_formal_character(self) -> None:
+        initial = self.register_initial_character()
+        before = self.formal_snapshot(initial["character_id"])
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_embedding_failed"):
+            MODULE.add_sample(
+                self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+                embedding_generator=failing_embedding,
+            )
+        self.assertEqual(self.formal_snapshot(initial["character_id"]), before)
+
+    def test_failure_before_sample_swap_preserves_formal_character(self) -> None:
+        initial = self.register_initial_character()
+        before = self.formal_snapshot(initial["character_id"])
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_finalization_failed"):
+            MODULE.add_sample(
+                self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+                embedding_generator=fake_embedding, fail_before_swap=True,
+            )
+        self.assertEqual(self.formal_snapshot(initial["character_id"]), before)
+
+    def test_competing_sample_addition_is_rejected(self) -> None:
+        initial = self.register_initial_character()
+        lock_path = self.characters / ".partial" / f"{initial['character_id']}.lock"
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_character_busy"):
+                MODULE.add_sample(
+                    self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+                    embedding_generator=fake_embedding,
+                )
+        finally:
+            os.close(descriptor)
 
     def _formal_directories(self) -> list[Path]:
         if not self.characters.exists():

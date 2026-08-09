@@ -182,9 +182,9 @@ Embeddingは `source.wav` から再生成可能な派生データとする。
 
 初期版の登録区間は3,000ms以上30,000ms以下とする。全sampleが0の音声を `registration_audio_silent`、RMSが-60 dBFS以下またはpeakが-40 dBFS以下の音声を `registration_audio_too_quiet` として拒否する。この値は登録入力の最低安全条件であり、人物一致判定や音声品質表示のAI閾値へ転用しない。
 
-安定error codeは `registration_invalid_request`、`registration_source_unavailable`、`registration_invalid_interval`、`registration_ffmpeg_launch_failed`、`registration_ffmpeg_failed`、`registration_wav_missing`、`registration_wav_invalid_format`、`registration_audio_too_short`、`registration_audio_too_long`、`registration_audio_silent`、`registration_audio_too_quiet`、`registration_model_unavailable`、`registration_embedding_failed`、`registration_embedding_invalid`、`registration_metadata_write_failed`、`registration_finalization_failed`、`registration_protocol_error` とする。未知codeを成功へ読み替えない。
+安定error codeは `registration_invalid_request`、`registration_source_unavailable`、`registration_invalid_interval`、`registration_ffmpeg_launch_failed`、`registration_ffmpeg_failed`、`registration_wav_missing`、`registration_wav_invalid_format`、`registration_audio_too_short`、`registration_audio_too_long`、`registration_audio_silent`、`registration_audio_too_quiet`、`registration_model_unavailable`、`registration_embedding_failed`、`registration_embedding_invalid`、`registration_metadata_write_failed`、`registration_finalization_failed`、`registration_character_not_found`、`registration_character_busy`、`registration_protocol_error` とする。未知codeを成功へ読み替えない。
 
-第8A／第8Bの開発時候補はSpeechBrain 1.0.3と `speechbrain/spkrec-ecapa-voxceleb` revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` とする。モデルとPython環境の絶対パスはDebug設定から注入し、存在・通常ファイルまたは所定ディレクトリ・非symlink境界・読取り可能性を起動前に検証する。実行中にモデルをダウンロードしない。完成版のPython・AIモデル配置／同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
+第8A／第8Bの開発時候補はSpeechBrain 1.0.3と `speechbrain/spkrec-ecapa-voxceleb` revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286` とする。モデルとPython環境の絶対パスはDebug設定から注入し、存在・通常ファイルまたは所定ディレクトリ・読取り可能性を起動前に検証する。Debug用virtualenvのPython実行パスはvenv判定を保持するため元の絶対パスで起動してよいが、symlink解決先が通常の実行可能ファイルであることを検証する。モデルディレクトリと人物データ境界のsymlinkは許可しない。実行中にモデルをダウンロードしない。完成版のPython・AIモデル配置／同梱方式とApp Sandbox採否は第22開始Gateまで未決定とする。
 
 人工合成音声による限定検証では、CPU上で192次元有限値Embeddingを再現可能に生成し、L2正規化centroidを構成できた。ただし実人物音声、雑音、複数話者、方言、端末差を使った精度検証ではないため、人物一致閾値は第15開始Gateまで未決定とする。実測詳細は `experiments/speaker-embedding/RESULTS.md` を参照する。
 

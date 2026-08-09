@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import ctypes
+import fcntl
 import json
 import math
 import os
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import uuid
 import wave
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -181,6 +184,7 @@ def generate_embedding(model_directory: Path, wav_path: Path, output: Path) -> N
     except RegistrationFailure:
         raise
     except Exception as error:
+        print(f"character registration embedding error: {type(error).__name__}: {error}", file=sys.stderr)
         raise RegistrationFailure("registration_embedding_failed") from error
 
 
@@ -207,6 +211,77 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
         os.rename(temporary, path)
     except OSError as error:
         raise RegistrationFailure("registration_metadata_write_failed") from error
+
+
+@contextmanager
+def character_update_lock(partial_root: Path, character_id: str):
+    lock_path = partial_root / f"{character_id}.lock"
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        raise RegistrationFailure("registration_character_busy") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RegistrationFailure("registration_character_busy")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RegistrationFailure("registration_character_busy") from error
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def copy_character_directory(source: Path, destination: Path) -> None:
+    validate_character_directory(source)
+    character = read_json(source / "character.json")
+    try:
+        (destination / "samples").mkdir(parents=True)
+        for sample_id in character["sample_ids"]:
+            source_sample = source / "samples" / sample_id
+            destination_sample = destination / "samples" / sample_id
+            destination_sample.mkdir()
+            for name in ("source.wav", "embedding.npy", "sample.json"):
+                source_file = source_sample / name
+                destination_file = destination_sample / name
+                ensure_regular_file(source_file, "registration_protocol_error")
+                with source_file.open("rb") as reader, destination_file.open("xb") as writer:
+                    while chunk := reader.read(1024 * 1024):
+                        writer.write(chunk)
+                    writer.flush()
+                    os.fsync(writer.fileno())
+        with (source / "character.json").open("rb") as reader, (destination / "character.json").open("xb") as writer:
+            writer.write(reader.read())
+            writer.flush()
+            os.fsync(writer.fileno())
+    except OSError as error:
+        raise RegistrationFailure("registration_metadata_write_failed") from error
+
+
+def atomic_swap(first: Path, second: Path) -> None:
+    rename = ctypes.CDLL(None, use_errno=True).renameatx_np
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(-2, os.fsencode(first), -2, os.fsencode(second), 0x00000002) != 0:
+        raise RegistrationFailure("registration_finalization_failed")
+
+
+def cleanup_swapped_character(update_root: Path, character_directory: Path) -> None:
+    try:
+        character = read_json(character_directory / "character.json")
+        validate_character_directory(character_directory)
+        for sample_id in character["sample_ids"]:
+            sample_directory = character_directory / "samples" / sample_id
+            for name in ("source.wav", "embedding.npy", "sample.json"):
+                (sample_directory / name).unlink()
+            sample_directory.rmdir()
+        (character_directory / "samples").rmdir()
+        (character_directory / "character.json").unlink()
+        character_directory.rmdir()
+        update_root.rmdir()
+    except (OSError, RegistrationFailure):
+        pass
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -285,6 +360,49 @@ def validate_character_directory(directory: Path) -> dict[str, Any]:
     }
 
 
+def build_sample(
+    sample_directory: Path,
+    sample_id: str,
+    character_id: str,
+    source: Path,
+    start_ms: int,
+    end_ms: int,
+    ffmpeg_path: Path,
+    model_directory: Path,
+    emitter: Emitter,
+    embedding_generator: Callable[[Path, Path, Path], None],
+) -> None:
+    sample_directory.mkdir(parents=True)
+    emitter.emit("progress", {"stage": "source_wav", "status": "running"})
+    wav_path = sample_directory / "source.wav"
+    extract_wav(ffmpeg_path, source, start_ms, end_ms, wav_path)
+    wav_metadata = inspect_wav(wav_path)
+    emitter.emit("progress", {"stage": "source_wav", "status": "completed"})
+
+    emitter.emit("progress", {"stage": "embedding", "status": "running"})
+    embedding_path = sample_directory / "embedding.npy"
+    embedding_generator(model_directory, wav_path, embedding_path)
+    validate_embedding(embedding_path)
+    emitter.emit("progress", {"stage": "embedding", "status": "completed"})
+
+    write_json(sample_directory / "sample.json", {
+        "schema_version": SCHEMA_VERSION,
+        "sample_id": sample_id,
+        "character_id": character_id,
+        "source_interval": {"start_ms": start_ms, "end_ms": end_ms},
+        "source_wav": wav_metadata,
+        "embedding": {
+            "file": "embedding.npy",
+            "model_id": MODEL_ID,
+            "model_revision": MODEL_REVISION,
+            "dimension": EMBEDDING_DIMENSION,
+            "dtype": "float32",
+            "normalization": "l2",
+            "source_wav_sha256": wav_metadata["sha256"],
+        },
+    })
+
+
 def register_character(
     request: dict[str, Any],
     ffmpeg_path: Path,
@@ -311,38 +429,10 @@ def register_character(
     final = root / character_id
     if staging.exists() or final.exists():
         raise RegistrationFailure("registration_finalization_failed")
-    sample_directory = staging / "samples" / sample_id
-    sample_directory.mkdir(parents=True)
-
-    emitter.emit("progress", {"stage": "source_wav", "status": "running"})
-    wav_path = sample_directory / "source.wav"
-    extract_wav(ffmpeg_path, source, start_ms, end_ms, wav_path)
-    wav_metadata = inspect_wav(wav_path)
-    emitter.emit("progress", {"stage": "source_wav", "status": "completed"})
-
-    emitter.emit("progress", {"stage": "embedding", "status": "running"})
-    embedding_path = sample_directory / "embedding.npy"
-    embedding_generator(model_directory, wav_path, embedding_path)
-    validate_embedding(embedding_path)
-    emitter.emit("progress", {"stage": "embedding", "status": "completed"})
-
-    embedding_metadata = {
-        "file": "embedding.npy",
-        "model_id": MODEL_ID,
-        "model_revision": MODEL_REVISION,
-        "dimension": EMBEDDING_DIMENSION,
-        "dtype": "float32",
-        "normalization": "l2",
-        "source_wav_sha256": wav_metadata["sha256"],
-    }
-    write_json(sample_directory / "sample.json", {
-        "schema_version": SCHEMA_VERSION,
-        "sample_id": sample_id,
-        "character_id": character_id,
-        "source_interval": {"start_ms": start_ms, "end_ms": end_ms},
-        "source_wav": wav_metadata,
-        "embedding": embedding_metadata,
-    })
+    build_sample(
+        staging / "samples" / sample_id, sample_id, character_id, source, start_ms, end_ms,
+        ffmpeg_path, model_directory, emitter, embedding_generator,
+    )
     write_json(staging / "character.json", {
         "schema_version": SCHEMA_VERSION,
         "character_id": character_id,
@@ -359,6 +449,71 @@ def register_character(
     summary = validate_character_directory(final)
     emitter.emit("progress", {"stage": "finalization", "status": "completed"})
     return summary
+
+
+def add_sample(
+    request: dict[str, Any],
+    ffmpeg_path: Path,
+    model_directory: Path,
+    emitter: Emitter,
+    embedding_generator: Callable[[Path, Path, Path], None] = generate_embedding,
+    fail_before_swap: bool = False,
+) -> dict[str, Any]:
+    require_exact_keys(request, {"protocol_version", "request_id", "operation", "character_id", "source_path", "start_ms", "end_ms", "characters_root"}, "registration_invalid_request")
+    character_id = request["character_id"]
+    start_ms = request["start_ms"]
+    end_ms = request["end_ms"]
+    if not isinstance(character_id, str) or CHARACTER_ID_PATTERN.fullmatch(character_id) is None:
+        raise RegistrationFailure("registration_invalid_request")
+    if not isinstance(start_ms, int) or isinstance(start_ms, bool) or not isinstance(end_ms, int) or isinstance(end_ms, bool):
+        raise RegistrationFailure("registration_invalid_interval")
+    if start_ms < 0 or end_ms <= start_ms or end_ms - start_ms < 3_000 or end_ms - start_ms > 30_000:
+        raise RegistrationFailure("registration_invalid_interval")
+    source = Path(request["source_path"]) if isinstance(request["source_path"], str) else Path()
+    root = prepare_root(request["characters_root"])
+    partial_root = root / ".partial"
+    formal = root / character_id
+    if not formal.exists():
+        raise RegistrationFailure("registration_character_not_found")
+
+    with character_update_lock(partial_root, character_id):
+        validate_character_directory(formal)
+        update_root = partial_root / ("update_" + str(uuid.uuid4()))
+        staging = update_root / character_id
+        try:
+            update_root.mkdir()
+        except OSError as error:
+            raise RegistrationFailure("registration_metadata_write_failed") from error
+        copy_character_directory(formal, staging)
+        character = read_json(staging / "character.json")
+        sample_id = "sample_" + str(uuid.uuid4())
+        build_sample(
+            staging / "samples" / sample_id, sample_id, character_id, source, start_ms, end_ms,
+            ffmpeg_path, model_directory, emitter, embedding_generator,
+        )
+        write_json(staging / "character.json", {
+            "schema_version": SCHEMA_VERSION,
+            "character_id": character_id,
+            "display_name": character["display_name"],
+            "sample_ids": [*character["sample_ids"], sample_id],
+        })
+        expected = validate_character_directory(staging)
+        if fail_before_swap:
+            raise RegistrationFailure("registration_finalization_failed")
+        atomic_swap(formal, staging)
+        try:
+            actual = validate_character_directory(formal)
+            if actual != expected:
+                raise RegistrationFailure("registration_protocol_error")
+        except RegistrationFailure:
+            try:
+                atomic_swap(formal, staging)
+            except RegistrationFailure:
+                pass
+            raise
+        emitter.emit("progress", {"stage": "finalization", "status": "completed"})
+        cleanup_swapped_character(update_root, staging)
+        return actual
 
 
 def list_characters(request: dict[str, Any]) -> list[dict[str, Any]]:
@@ -393,6 +548,9 @@ def main() -> int:
         operation = request.get("operation")
         if operation == "register_character":
             character = register_character(request, ffmpeg_path, model_directory, emitter)
+            result = {"character": character}
+        elif operation == "add_sample":
+            character = add_sample(request, ffmpeg_path, model_directory, emitter)
             result = {"character": character}
         elif operation == "list_characters":
             result = {"characters": list_characters(request)}
