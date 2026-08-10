@@ -327,7 +327,7 @@ lockはSwiftUI ViewではなくPython解析runnerが、解析要求を受理す�
 
 `stop.requested` はSwift所有の永続JSONとし、`schema_version: 1`、対象 `job_id`、停止操作の `request_id` だけを必須とする。固定partialへ排他的に書き、flush、fsync、再読込み検証後に正式化する。Pythonは正式ファイルだけを読み、壊れたJSON、未知schema、job不一致を停止要求として推測しない。
 
-新規開始または復旧監査時、正式lockを取得したServiceだけが `stop.requested` を判定する。現在の `job.json.state == stop_requested` かつjob ID一致の場合だけ有効要求とする。それ以外の正しく検証できる停止要求はstaleとし、固定ファイル1件だけを個別unlinkして不在を確認する。symlink、未知項目、壊れたJSONは削除せず `job_workspace_invalid` でfail-closedとする。時刻や経過秒数でstaleを推測しない。停止完了表現と停止後清掃は第14開始Gateで確定する。
+新規開始または復旧監査時、正式lockを取得したServiceだけが `stop.requested` を判定する。現在の `job.json.state == stop_requested` かつjob ID一致の場合だけ有効要求とする。それ以外の正しく検証できる停止要求はstaleとし、固定ファイル1件だけを個別unlinkして不在を確認する。symlink、未知項目、壊れたJSONは削除せず `job_workspace_invalid` でfail-closedとする。時刻や経過秒数でstaleを推測しない。停止完了表現と停止後清掃は第8.10節を正本とする。
 
 workspaceはApplication Support配下の固定 `local.YoiSceneKirinuKu/workspace`、job領域はその直下の固定 `current_job` とする。第9段階で作成・更新・清掃できるのは `analysis.lock`、`current_job/job.json`、`current_job/stop.requested`、および名前とrequest IDを検証した対応partialだけとする。外部入力から削除パスを受け取らず、全親と対象の非symlink、canonicalな1階層、既知種類を検証する。glob、一般的な再帰削除、未知項目の削除、workspace root自身の削除を禁止する。後続段階が成果物を追加するたびに許可リストと清掃責務をその開始Gateで拡張する。
 
@@ -643,7 +643,7 @@ Security-Scoped Bookmark、配布版App Sandbox、スリープ抑止方式も未
 - Pythonの最終配置・同梱方式は未決定とし、Python subprocessを本体へ組み込む段階の開始Gateまでに正式決定する。
 - この技術検証時点ではApp Sandboxの採否は未決定だった。第3段階の開発構成と配布版の最終採否は、本書第17節冒頭の方針に従って分離する。
 - この技術検証時点ではJSON Lines schemaとprotocol violation処理は未決定だった。第3段階Preflightの正式契約は本書第9節に従い、後続段階で追加が必要な契約は対応する開始Gateで決定する。
-- 停止signal、猶予時間、強制終了方式は未決定とし、第14開始Gateまでに正式決定する。
+- この技術検証時点では停止signal、猶予時間、強制終了方式は未決定だった。第14段階で決定した初期版契約は第8.10節を正本とする。
 - FFmpeg子プロセスの起動、監視、停止および異常終了時の管理方式は未検証とし、Python → FFmpegを初めて本実装する段階の開始Gateまでに技術検証し、正式決定する。
 - 今回の実験でtimeout時の後始末に使用した `terminate()` は、本番の停止方式として採用しない。
 - SwiftおよびClangのmodule cacheを本番でどこへ配置し、どのように扱うかは未決定とする。検証時の `/private/tmp/yoi-scene-swift-python-module-cache` 指定は、検証環境の書込み制約を回避するためだけの措置であり、本番アーキテクチャとして採用しない。
@@ -678,7 +678,7 @@ Security-Scoped Bookmark、配布版App Sandbox、スリープ抑止方式も未
 
 `subprocess.run()` は今回の短時間処理で成立性を確認した候補方式であり、本番の長時間FFmpeg処理、停止、強制終了、Process group管理まで含めた最終方式として確定しない。実測の詳細は `experiments/python-ffmpeg-subprocess/RESULTS.md` を参照する。
 
-#### 未検証・未決定の事項
+#### 技術検証時点で未決定だった事項
 
 - FFmpegとffprobeの最終配置・同梱方式、およびHomebrew版へ本番依存するかは未決定とする。
 - Pythonの最終配置・同梱方式は未決定とする。
@@ -780,7 +780,7 @@ Security-Scoped Bookmark、配布版App Sandbox、スリープ抑止方式も未
 - App SandboxおよびSecurity-Scoped Bookmark下での停止動作
 - アプリまたはPythonの強制終了後の復旧
 
-これらは第14その他の対応する開始Gateまで未決定とし、今回の限定実験から推測で確定しない。停止契約全体は完了扱いにしないが、対応する開始Gateへの明示的な繰延べを前提に、同項目の未決定だけを理由として第0段階の完了を妨げない。
+このうち停止signal、猶予、強制終了、process group、停止通信、`stop.requested`の正式契約は、第14開始Gateの追加検証を経て第8.10節で決定した。本番FFmpegコマンド、完成MP4保存、App Sandbox、Security-Scoped Bookmark、配布構成およびアプリ異常終了後の外部processは、各対応Gateまで未決定・未検証のまま維持する。
 
 ### 17.5 App Sandboxあり／なし subprocess比較検証結果
 
