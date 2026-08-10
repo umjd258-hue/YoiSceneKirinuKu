@@ -143,6 +143,14 @@ UIを実装するときは、必要に応じて `docs/design/DESIGN_REFERENCE.md
 - `docs/DECISIONS.md` は判断履歴であり、実装仕様の正本ではない。`PRODUCT_SPEC.md`、`UI_SPEC.md`、`ARCHITECTURE.md` その他の正本仕様書を優先する。
 - 判断履歴を更新した作業も差分を確認し、今回変更した対象だけをコミットして現在の作業ブランチを `origin` へpushする。
 
+## 省トークン運用
+
+- 作業開始時は `docs/CURRENT_STATUS.md` を入口とし、対象Stageに必要な仕様書・実装・`DECISIONS.md` の該当箇所だけを確認する。正本仕様書の優先順位は変えない。
+- 完了済みStageの経緯やチャット履歴を毎回再構成せず、現在の依存関係を確認するために必要な場合だけ再調査する。
+- 検索結果、コマンド出力、diff全文を報告へ転記しない。最終報告は原則として、変更、検証結果、失敗、未検証、Git状態、次作業に絞る。
+- 重要な仕様判断は `docs/DECISIONS.md`、現在位置と次作業は `docs/CURRENT_STATUS.md` に簡潔に記録し、チャット履歴だけへ依存しない。
+- `docs/CURRENT_STATUS.md` は進捗の要約であり正本仕様ではない。Stage完了、Blocker、次作業が変わったときだけ更新し、既存の正本仕様書および `docs/IMPLEMENTATION_STEPS.md` と矛盾させない。
+
 ## 開発の合言葉
 
 - 今必要なものだけ見せる。
