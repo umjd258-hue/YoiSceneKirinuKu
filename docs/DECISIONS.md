@@ -1466,3 +1466,103 @@ Gate契約、停止要求Service、子process停止、停止後検証、停止�
 人工音声検証を実人物精度/閾値へ無断転用しない。
 新チャットという理由だけで再検証しない。
 判断変更時は置換関係を明示する。
+
+---
+
+## 2026-08-11：現行Stage 3開始Gateの正式決定
+
+### 問題
+
+現行Stage 3「設定・保存先・権限基盤」の開始Gateに必要なApp Sandbox採否、外部ストレージアクセス方式、bookmark方針が未決定だった。
+
+### 根拠
+
+- 旧Stage体系の履歴では、初期開発構成のApp Sandbox無効でSwift→Python→FFmpeg系subprocessが成立している。
+- 正式署名したApp Sandbox構成でのsubprocess、外部ストレージ、Security-Scoped Bookmarkは未検証であり、成立を推測できない。
+- 製品仕様は完全ローカル、元動画非破壊、外部ストレージの必要最小限権限、失敗時のfail-closedを要求している。
+
+### 変更内容・決定
+
+- 初期版はApp Sandboxを無効とする。Stage 27でRelease構成と合わせて再評価する。
+- 外部ストレージはユーザーが明示選択した元動画と出力先だけを扱う。元動画は読み取り専用とし、出力先は別途選択する。
+- 選択URLのbookmark dataを永続化する。解決失敗、stale、volume不一致時は自動継続せず、再選択を要求する。
+
+### 影響正本
+
+`STORAGE_AND_RECOVERY.md`、`SECURITY_CHECKLIST.md`、`UNDECIDED_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 3。App Sandbox再評価はStage 27、出力finalize時のvolume identity/collisionはStage 22で扱う。
+
+### 再検証範囲
+
+Stage 3でbookmark保存・再起動後再取得・解決失敗・stale・volume不一致・権限失効を検証する。Stage 22でSD抜去、容量不足、衝突、finalizeを検証し、Stage 27でApp Sandbox採否を再評価する。
+
+### Gate判定
+
+3項目が一意に決定されたため、現行Stage 3開始GateをPASSとする。Stage 3本体の実装・検証完了を意味しない。
+
+---
+
+## 2026-08-11：現行Stage 3設定保存の対象判定
+
+### 問題
+
+現行Stage 3の設定保存について、既存UIに永続化対象となる設定値が存在するか確認が必要だった。
+
+### 根拠
+
+- 現UIで変更できる人物選択、候補選択、人物登録入力は、ジョブ・選択・登録処理に属する一時状態である。
+- raw path、bookmark、処理中状態は今回の設定保存対象外である。
+- 永続化可能な既存設定プロパティは存在しない。
+
+### 決定
+
+- 現時点の設定保存はCompleted（対象なし）とする。
+- 新しい設定項目、UserDefaults実装、既存一時状態の永続化は追加しない。
+
+### 影響正本・影響Stage
+
+`CURRENT_STATUS.md`、現行Stage 3。
+
+### 再検証範囲
+
+将来、ユーザー変更可能な正式設定項目を追加する場合に限り、保存方式、初期値、migration、破損時fallbackを対応Stageで再検証する。
+
+---
+
+## 2026-08-11：現行Stage 3 bookmark保存場所・volume identityの正式決定
+
+### 問題
+
+bookmark dataの保存場所と、復元時に選択時と同じvolumeであることを判定する方式が未決定だった。
+
+### 根拠
+
+- bookmark dataは小容量のDataであり、Stage 3では専用ファイルschema・atomic write・復旧設計を追加しない。
+- raw pathはmount位置変更やvolume差し替えを安全な同一性根拠にできない。
+- Stage 22は出力finalize時のcollision、抜去、partial、retryを扱い、Stage 3で確定するbookmark復元方式を弱めない。
+
+### 変更内容・決定
+
+- bookmark dataだけをUserDefaultsへ保存し、raw pathは保存しない。
+- 元動画用と出力先用のbookmark dataを別キーで保存する。
+- 選択時のvolume UUID文字列をbookmarkとは別に保存する。
+- 復元URLのvolume UUID文字列との完全一致を必須とし、bookmark解決失敗、stale、UUID取得不能・不一致時は自動継続せず再選択を要求する。
+
+### 影響正本
+
+`STORAGE_AND_RECOVERY.md`、`SECURITY_CHECKLIST.md`、`UNDECIDED_REGISTER.md`、`GATE_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 3。Stage 22では同じvolume UUID方式を維持し、collision、抜去、partial、finalizeを追加検証する。
+
+### 置換関係
+
+先行する「現行Stage 3開始Gateの正式決定」にあるvolume identityをStage 22で決定する記述は、本決定で置換する。volume UUIDによる復元時同一性はStage 3で確定し、Stage 22では方式を変更せずfinalize時の追加検証を行う。
+
+### 再検証範囲
+
+bookmark保存、再起動後復元、元動画・出力先キー分離、raw path非保存、解決失敗、stale、volume UUID取得不能・不一致、再選択をStage 3で検証する。Stage 22でSD抜去・再接続とfinalize中の同一性を追加検証する。

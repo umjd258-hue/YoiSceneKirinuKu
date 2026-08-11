@@ -4,7 +4,6 @@
 
 | 未決定事項 | 決定期限 |
 |---|---|
-| App Sandbox正式採否 | Stage 3開始Gate |
 | bundled Python exact version/package lock | Stage 6開始Gate |
 | packaged appでの完全offline subprocess | Stage 6開始Gate |
 | source.wav最低品質/長さ条件 | Stage 8A開始Gate |
@@ -20,7 +19,7 @@
 | quality数値閾値 | Stage 17開始Gate |
 | ◎/○/△変換 | Stage 17開始Gate |
 | export codec/stream copy/re-encode | Stage 21開始Gate |
-| 保存先bookmark/volume identity/collision | Stage 22開始Gate |
+| 保存先collision | Stage 22開始Gate |
 | performance budget正式値 | Stage 25 |
 | Release minimum macOS/Xcode/tool versions | Stage 27 |
 

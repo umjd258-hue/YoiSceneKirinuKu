@@ -24,7 +24,7 @@
 | Stage 15 | 実人物閾値を根拠付き決定可能 | match/unknown/表示変換 | 代表的ラベル付き実人物データ | 13 |
 | Stage 17 | 品質閾値を根拠付き決定可能 | feature→quality規則 | 代表的音声で誤判定確認 | 16 |
 | Stage 21 | export品質/互換性を決定可能 | copy/reencode/codec | keyframe/音ズレ/品質 | 18-20 |
-| Stage 22 | SD保存を安全にfinalize可能 | bookmark/volume/collision/naming | 抜去/容量不足/partial/retry | 21 |
+| Stage 22 | SD保存を安全にfinalize可能 | bookmark/volume方式の維持・再検証、collision/naming | 抜去/容量不足/partial/retry | 21 |
 | Stage 25 | 性能値を実測可能 | 測定方法 | 長尺/peak memory/disk/UI | 23-24 |
 | Stage 26 | 異常系E2E可能 | test matrix | SD抜去/sleep/crash/recovery | 25 |
 | Stage 27 | 完成条件を全て判定可能 | release versions/known issues | acceptance/release/offline | 26 |
