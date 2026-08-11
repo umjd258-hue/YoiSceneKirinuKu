@@ -51,7 +51,7 @@ Tests: 作成、再読込、source変化、未知成果物。
 Done: jobを安全に識別/復旧判定できる。
 
 ## Stage 6: Python subprocess/JSON Lines通信
-Gate: IPC_PROTOCOLのrequest/progress/result/error/stop契約を確定。
+Gate: IPC_PROTOCOLのrequest/progress/error/finished(outcome)契約を確定。
 Input: job/request。
 Output: 安定JSON Lines通信。
 Scope: Process Service/parser。

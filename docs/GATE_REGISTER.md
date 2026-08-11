@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | Stage 3 | 保存先・権限基盤を安全に構築可能 | bookmark/権限/保存先方針 | 保存先選択・再取得・失敗系 | 1-2 |
 | Stage 4 | 動画をfail-closedで受入判定可能 | MP4/source metadata/preflight条件 | 正常/動画なし/音声なし/読取不可/容量不足 | 1-3 |
-| Stage 6 | offline subprocessを安全に構築可能 | Sandbox/Python配置/version/IPC | packaged Swift→Python、JSON Lines、通信なし | 1-5 |
+| Stage 6 | offline subprocessを安全に構築可能 | Python 3.13.14/第三者package 0件/Bundle固定配置/IPC Envelope・ownership | packaged Swift→Python、JSON Lines、通信なし | 1-5 |
 | Stage 7A | FFmpeg実行方式が一意 | 開発時/製品時配置・version・実行方式 | ffmpeg/ffprobe起動・version・offline | 3,6 |
 | Stage 7B | 解析用WAVを安全に正式化可能 | 16kHz mono WAV/partial/再利用 | MP4→WAV、音声なし、失敗、partial、再利用 | 4,7A |
 | Stage 8A | Speaker Embedding方式を再現可能に決定可能 | model/preprocess/dimension/normalization | 同一入力再現・保存互換・基本cost | 6 |
@@ -30,3 +30,5 @@
 | Stage 27 | 完成条件を全て判定可能 | release versions/known issues | acceptance/release/offline | 26 |
 
 Gate未通過なら該当Stage本実装禁止。数値を推測してGateを突破しない。
+
+Stage 6は事前決定に加え、Bundle同梱の固定相対位置からの起動、strict JSON Lines、stdout/stderr分離、Python audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用、PATH・download・user site非依存を限定検証したため開始Gate PASS。`lsof -i`は反復時点の観測であり、Python外の極短時間socketの連続監視ではない。

@@ -6,12 +6,12 @@
 
 ## 現在位置
 
-- Current Stage: Stage 3
-- Current Substage: なし
-- State: Completed
-- Current Purpose: 設定・保存先・権限基盤
+- Current Stage: Stage 7
+- Current Substage: Stage 7A
+- State: Partial
+- Current Purpose: FFmpeg配置Gate
 - Last Confirmed HEAD: `2c02aef96a3a3d6b9351f893e710dc96726f3bb9`
-- Next Action: `CURRENT_STATUS.md`を単独commitし、Stage 3関連commitのpush可否を判断する。
+- Next Action: Stage 6変更のcommit対象を既存未コミット差分から分離確認する。
 
 ## Stage別復元結果
 
@@ -22,7 +22,7 @@
 | Stage 3 設定・保存先・権限基盤 | Completed | 開始Gateは正式決定済み。設定保存はCompleted（対象なし）。元動画・出力先の明示選択、bookmark永続化、再起動後復元、権限失効・stale・volume UUID不一致時のfail-closed再選択を限定テストで確認済み |
 | Stage 4 動画選択とPreflight | Completed | `cff38ff`、`af915ad`、`Preflight.swift`、`preflight.py`、関連テストが存在 |
 | Stage 5 ジョブ管理・workspace | Completed | `5f04f63`、`7502951`、`JobManagement.swift`、`analysis_job_runner.py`、関連テストが存在 |
-| Stage 6 Python subprocess/JSON Lines通信 | Partial | subprocess検証 `82c3594`、streaming検証 `0dcc1bb` と複数のstrict parserは存在するが、bundled Python exact version/package lockと配布版完全offline構成が未確定 |
+| Stage 6 Python subprocess/JSON Lines通信 | Completed | Python 3.13.14、第三者package 0件、固定SHA・Sigstore offline検証済みinstallerから製品runtimeを構築し、Bundle固定相対位置へ配置。strict JSON Lines、stdout/stderr分離、malformed・非0終了・stop、stdlib限定、audit hook、network API不使用、固定相対位置起動を確認し、Swift↔Python通信の完了条件を満たした |
 | Stage 7 FFmpeg解析用音声抽出 | Partial | Stage 7Aが未完了。Stage 7B相当の解析WAV生成は存在するが、親Stage完了条件を満たさない |
 | Stage 7A FFmpeg配置Gate | Partial | Python→FFmpeg検証 `fa590b3` と実行経路は存在するが、配布時FFmpeg/ffprobe exact build/version・配置方式が未確定 |
 | Stage 7B 解析用音声抽出 | Partial | `3aa3895`、`044d281`、`AnalysisAudio.swift`、`analysis_audio.py`、関連テストが存在するが、前提のStage 7Aが未完了 |
@@ -54,7 +54,8 @@
 
 - Stage 15: 代表性あるラベル付き実人物データが不足している。人工音声2話者の値から人物一致閾値、人物不明判定、表示変換を推測しない。
 - Stage 3開始Gate: PASS。初期版App Sandbox無効、外部ストレージはユーザー明示選択のみ、bookmark永続化とfail-closed再選択を正式決定。
-- Stage 6/7A: 配布時のPython・FFmpeg・ffprobe exact version/package/buildと完全offline配置が正式未確定。
+- Stage 6開始Gate: PASS。Python 3.13.14のBundle同梱起動、strict JSON Lines、stdout/stderr分離、audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用を限定検証済み。`lsof -i`は連続監視ではない。
+- Stage 7A: 配布時FFmpeg/ffprobeのexact build/version・配置方式が正式未確定。
 - Stage 8C: 複数sample representation更新とmodel変更時再生成の正式契約が未完了。
 - 既知問題: Xcodeテスト環境下で既存Python subprocess起動が長時間停止する場合がある。Stage 12〜14の記録では、該当Stage固有経路外として切り分け済みだが、全体テスト完走済みとは扱わない。
 
@@ -66,6 +67,6 @@
 
 ## 検証範囲
 
-- 実施: HEADと作業ツリーの `CURRENT_STATUS.md` 差分、Git log、主要実装・最終検証commit、tracked成果物、現行Stage定義の読み取り照合。Stage 3のbookmark再起動後復元、権限失効、stale、volume UUID不一致、再選択の限定7テスト。
+- 実施: HEADと作業ツリーの `CURRENT_STATUS.md` 差分、Git log、主要実装・最終検証commit、tracked成果物、現行Stage定義の読み取り照合。Stage 3のbookmark再起動後復元、権限失効、stale、volume UUID不一致、再選択の限定7テスト。Stage 6のBundle同梱Python 3.13.14起動、strict JSON Lines、stdout/stderr分離、audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用の限定Gate検証。固定artifactのSigstore offline検証、製品Build Phaseによるruntime組込み、Bundle内固定相対位置からの`-I -S`起動、製品probe疎通を確認。
 - 未実施: 通常テスト、実データ検証、外部アクセス。
 - この復元は過去commitのテスト結果を根拠としており、現作業ツリーの再テスト成功を意味しない。

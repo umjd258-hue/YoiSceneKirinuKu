@@ -18,6 +18,11 @@
 ## subprocess
 - `shell=True`禁止。
 - executableと引数配列を明示。
+- 製品版はPython 3.13.14 runtimeとStage 6スクリプトをBundleに同梱し、固定相対位置からFoundation `Process`で起動する。
+- 製品runtimeは`vendor/python/3.13.14/`の固定SHA-256付き公式macOS universal2 installer原本から抽出し、ローカル`/Library/Frameworks`をBuild入力にしない。installer原本はGit LFS、manifest・取得元記録・PSF Licenseは通常Gitで管理する。
+- Stage 6製品スクリプトは`Contents/Resources/Stage6/stage6_runtime_probe.py`へ配置し、テストfixtureは製品Bundleへ含めない。
+- Python installerは固定SHA-256に加え、standalone `cosign v2.6.2`、固定Sigstore bundle、固定trusted root、固定identity・issuerによるoffline検証を必須とする。cosignは製品Bundleへ含めず、検証時のTUF更新やnetworkアクセスを禁止する。trusted rootはSigstore公式`root-signing` commit `c9bda74ad2221f938f7d2e0295ca3aad2da710a8`の公式raw版、SHA-256 `6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`に固定する。
+- PATH探索、実行時download、user site package読込みを禁止する。外部注入pathはDebug用途に限定する。
 - stdout = JSON Lines protocol専用。
 - stderr = ログ。
 - 終了コード確認。
@@ -35,7 +40,7 @@ schema/内容/必要ファイルを検証後に正式化。
 
 ## 配置
 - Python/FFmpeg/AIモデルの開発時配置と製品配布時配置を分離して定義する。
-- 配置方式はStage Gateで正本化する。
+- Pythonの製品配置はStage 6で正本化済み。FFmpeg/AIモデルの配置方式は対応するStage Gateで正本化する。
 - App Sandbox採否、Security Scoped Bookmark等の外部ストレージアクセス方式もGateで確定する。
 
 ## 初期版の軽量化制約

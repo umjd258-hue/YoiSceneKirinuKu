@@ -3,21 +3,18 @@
 Swift↔Pythonは1行1JSONのJSON Lines。
 
 ## 共通Envelope
-必須候補:
-- `schema_version`
+全messageの必須key:
+- `protocol_version`
 - `type`
 - `request_id`
-- `job_id`
-- `timestamp_ms`（必要時）
+- `sequence`
+- `payload`
 
 ## type
 - request
-- accepted
 - progress
-- result
 - error
-- stopped
-- log_ref
+- finished
 
 ## request
 コマンド名とpayloadを含む。
@@ -30,27 +27,22 @@ Swiftは1 requestごとに一意request_idを生成。
 - message_code（必要時）
 数値の意味をStageごとに固定する。
 
-## result
-- success=true
-- payload
-- artifact references
-
 ## error
-- success=false
 - error_code
 - recoverable
 - details_ref（必要時）
 生tracebackをprotocol本文の正式契約にしない。
 
-## stop
-Swiftから協調停止要求を送る。
-Pythonは安全地点で停止し、`stopped`を返す。
-強制終了は最終手段。
+## finished
+成功・失敗・停止のterminal通知は、既存の`finished(outcome)`方式を使用する。停止用の独立eeventは追加しない。
+
+## ownership
+- Swift Serviceがrequest IDの生成、`Process`、stdin送信、Envelope・sequence・terminalの検証を所有する。
+- Pythonがeventを生成する。
+- stdoutはJSON Lines protocol専用、stderrはログ専用とする。
 
 ## parser
 - 1行ずつstrict parse。
 - JSONでないstdoutはprotocol violation。
 - stdoutにデバッグprintしない。
 - stderrはログ専用。
-
-具体キーとownershipはStage 6で確定する。

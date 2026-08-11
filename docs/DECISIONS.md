@@ -1566,3 +1566,169 @@ Stage 3。Stage 22では同じvolume UUID方式を維持し、collision、抜去
 ### 再検証範囲
 
 bookmark保存、再起動後復元、元動画・出力先キー分離、raw path非保存、解決失敗、stale、volume UUID取得不能・不一致、再選択をStage 3で検証する。Stage 22でSD抜去・再接続とfinalize中の同一性を追加検証する。
+
+---
+
+## 2026-08-11：現行Stage 6開始GateのPython・offline subprocess・IPC契約
+
+### 問題
+
+Stage 6開始Gateに必要なbundled Pythonのexact version/package lock、製品版の完全offline subprocess構成、IPCの具体keyとownershipが未決定だった。
+
+### 根拠
+
+- Python 3.13.14と標準ライブラリのみの構成で、Foundation `Process`によるSwift→Python起動とstdout/stderr streamingの既存技術検証が成立している。
+- 完全ローカル、再現性、shell非介在の正本要求は、system PythonやPATH探索、実行時downloadと両立しない。
+- 既存実装とStage 14の確定履歴は、順序付きeventと`finished(outcome)`によるterminal/停止通知を使用している。
+
+### 変更内容・決定
+
+- bundled Pythonを`3.13.14`に固定し、Stage 6の第三者packageは0件とする。後続依存は各Gateで別途固定する。
+- 製品版はPython runtimeとStage 6スクリプトをBundleに同梱し、固定相対位置からFoundation `Process`でshellなしに起動する。PATH探索、実行時download、user site package読込みを禁止し、外部注入pathはDebug用途に限定する。
+- Envelopeを`protocol_version` / `type` / `request_id` / `sequence` / `payload`に固定する。
+- Swift Serviceがrequest ID、`Process`、stdin、protocol検証を所有し、Pythonがeventを生成する。stdoutはprotocol専用、stderrはログ専用とする。
+- terminal/停止は既存の`finished(outcome)`方式を正式採用する。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`IPC_PROTOCOL.md`、`GATE_REGISTER.md`、`UNDECIDED_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 6。Python/IPC契約を利用する後続Stageは、Stage 6で共通契約を確定後に必要範囲を再検証する。後続のAI依存・FFmpeg依存のversion固定は各Gateの責務のままとする。
+
+### 置換関係
+
+過去の確定履歴にある「配布時Python配置は後続Gateまで未決定」という記載は、当時の歴史的記録として保持し、Python配置に限って本決定で置換する。FFmpeg・AI依存・App Sandboxの未決定・未検証は置換しない。
+
+### 再検証範囲
+
+Bundle同梱Python 3.13.14の固定相対位置からのshellなし起動、第三者package・user site package非使用、PATH非依存、strict JSON Lines、request ID・sequence・terminal検証、stdout/stderr分離、外部通信なしをStage 6で検証する。既存の関連subprocess consumerは共通契約への適合範囲を再検証する。
+
+### 検証結果
+
+- Python 3.13.14 runtimeとStage 6 fixtureを一時app Bundleへ同梱し、固定相対位置からFoundation `Process`でshellなしに起動できた。
+- strict JSON Linesのrequest、`progress`、`finished(outcome: succeeded)`と、stdout protocol専用・stderr診断専用の分離を検証した。
+- Python audit hookでsocket操作をfail-closedとし、event 0件を確認した。Swift/Python processへの`lsof -i`を観測待機中に5回実行し、Internet socketは検出されなかった。
+- 第三者package 0件、Swift Gate sourceのnetwork API不使用、PATH探索・実行時download・user site package読込みの非使用を静的・実行時に確認した。
+
+### 外部通信観測の限界
+
+`sandbox-exec`と`nettop`は実行環境の制約で使用できなかった。`lsof -i`は反復時点の観測であり、Python外の極短時間socketの連続監視ではない。そのため、Python audit hookのfail-closed、Swift network API不使用の静的検証、`lsof -i`5回の併用結果に限定して外部通信なしを確認した。
+
+### Gate判定
+
+3項目の事前決定と必要な限定技術検証が完了したため、Stage 6開始GateをPASSとする。Stage 6本実装と完了判定を意味しない。
+
+---
+
+## 2026-08-11：Stage 6製品Bundleのruntime入力・保管・製品probe決定
+
+### 問題
+
+Stage 6開始Gateは一時Bundleで成立したが、製品Buildで使うPython runtimeの再現可能な入力元、保管・ライセンス方式、製品Bundleへ入れるStage 6スクリプトの実体が未決定だった。
+
+### 根拠
+
+- Gateで使用したローカル`/Library/Frameworks/Python.framework`は開発環境依存であり、製品Buildの再現可能な入力にできない。
+- Releaseは完全offline・Bundle固定相対パスで動作し、第三者package 0件、PATH探索・Build時download・user site依存禁止を維持する必要がある。
+- 既存の共通Process ServiceとGate fixtureにより、strict request、audit hook、`progress`、`finished(outcome: succeeded)`の最小疎通責務を分離できる。
+
+### 変更内容・決定
+
+- Python 3.13.14公式macOS universal2 installer原本を製品runtimeの入力に固定し、SHA-256をmanifestで固定する。Build時は保存済み原本から必要runtimeだけを抽出し、ローカル`/Library/Frameworks`依存とBuild時downloadを禁止する。
+- installer原本は`vendor/python/3.13.14/`でGit LFS管理し、SHA manifest、取得元記録、PSF Licenseは通常Git管理する。LFS object未取得時はfail-closedとする。
+- 製品スクリプトを`Contents/Resources/Stage6/stage6_runtime_probe.py`に固定する。`operation=runtime_probe`だけをstrictに受理し、socket操作をfail-closedにするaudit hookを設定して、stdoutへ`progress`と`finished(outcome: succeeded)`だけを出力する。第三者packageは使用しない。
+- malformed、未知type、非0終了、停止待機等を生成するテストfixtureはTest Bundle専用とし、製品Bundleへ含めない。
+- Debug用外部注入とReleaseのBundle固定経路を分離し、Releaseでは外部注入pathを使用しない。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`ARCHITECTURE.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 6のみ。FFmpeg・AIモデル・後続Stage固有Python依存の配置やversionは変更しない。
+
+### 再検証範囲
+
+固定SHA-256とLFS objectのfail-closed、保存原本からのruntime抽出、第三者package 0件、PSF License収録、Bundle固定相対配置、dylib参照、内側から外側への署名、Debug/Release経路分離、製品probeのstrict request・audit hook・stdout/stderr・terminal・終了コードをStage 6で検証する。Stage 6は進行中のため、完了済みStageの再検証は発生しない。
+
+---
+
+## 2026-08-11：Stage 6 Python installerのoffline Sigstore検証方式
+
+### 問題
+
+公式SHA-256と完全一致するPython 3.13.14 macOS installerに対し、`pkgutil --check-signature`が`invalid signature`を返した。SHA一致だけで許容するか、別の公式検証方式を採用するかが未決定だった。
+
+### 根拠
+
+- python.org公式の同一pkg用Sigstore bundleはbundle v0.3で、pkgのSHA-256 `8e58affb218c155a1dfdc27b291f817129669f8760e7a297adb2e4439ba5d2e8`と一致するdigestを持つ。
+- bundleのSHA-256は`9393259f810ab74e38e49e20cd6862fb0fcff17dbaee0f6e7cfd682102197b50`、署名identityは`thomas@python.org`、issuerは`https://accounts.google.com`と確認した。
+- Sigstore bundleは固定trusted rootを指定することでoffline検証できる。Build時network・実行時TUF更新は完全offlineと再現性の要件に反する。
+
+### 変更内容・決定
+
+- Python installerの配布元検証にstandalone `cosign v2.4.1`を使用し、製品Bundleへ含めない。
+- cosign macOS arm64実行物の取得元、SHA-256、ライセンスを固定する。未確認値は導入時に実測し、推測で記録しない。
+- Sigstore公式`trusted_root.json`を取得元commit・SHA-256・SOURCE・manifestとともに`vendor/sigstore/trusted_root.json`へ通常Git管理し、実行時TUF更新を禁止する。
+- pkg、Sigstore bundle、trusted root、identity=`thomas@python.org`、issuer=`https://accounts.google.com`をすべて固定指定し、offlineでfail-closed検証する。
+- `pkgutil`署名失敗を無条件に許容せず、上記Sigstore検証成功をruntime抽出の前提とする。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`ARCHITECTURE.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 6のみ。製品runtimeと後続Stageの第三者package構成は変更しない。
+
+### 再検証範囲
+
+cosign実行物・Sigstore bundle・trusted rootのSHA-256、trusted root取得元commit、固定identity・issuer、networkなしのoffline検証、検証失敗時にruntime抽出を開始しないfail-closed動作をStage 6で確認する。Stage 6は進行中のため、完了済みStageの再検証は発生しない。
+
+---
+
+## 2026-08-11：Stage 6 offline Sigstore検証toolの安全更新
+
+### 問題
+
+採用済みの`cosign v2.4.1`は、固定trusted rootを使用する検証経路に影響する既知脆弱性の対象であり、fail-closedなinstaller検証toolとして維持できない。
+
+### 根拠
+
+- 当該脆弱性の修正版は`cosign v2.6.2`である。
+- `cosign v2.4.1` macOS arm64実行物のSHA-256は未固定で、導入前である。
+- bundle v0.3とSigstore公式trusted rootの取得元は確認済みだが、採用する`root-signing` commitは未確定である。
+
+### 変更内容・決定
+
+- standalone cosignの固定versionを`v2.4.1`から`v2.6.2`へ更新し、`v2.4.1`は不採用とする。
+- `v2.6.2` macOS arm64実行物の取得元・SHA-256・ライセンスを固定し、製品Bundleへは含めない。
+- `v2.6.2`でbundle v0.3のoffline検証を限定実測し、成功した場合にのみ検証構成を確定する。
+- trusted rootはSigstore公式`root-signing` commit `c9bda74ad2221f938f7d2e0295ca3aad2da710a8`の`targets/trusted_root.json`公式raw版を採用し、SHA-256を`6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`に固定する。取得元commit・公式raw URL・SHA-256を一体で管理する。
+- pkg、Sigstore bundle、trusted root、identity=`thomas@python.org`、issuer=`https://accounts.google.com`を固定指定し、networkなしでfail-closedとする既存方針は維持する。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`ARCHITECTURE.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 6のみ。製品runtime、後続Stageの依存、製品挙動は変更しない。
+
+### 置換関係
+
+2026-08-11の「Stage 6 Python installerのoffline Sigstore検証方式」にある`cosign v2.4.1`採用部分だけを本決定で置換する。その他の固定・offline・fail-closed方針は維持する。
+
+### 再検証範囲
+
+`cosign v2.6.2` macOS arm64実行物の取得元・SHA-256・ライセンス、bundle v0.3との互換性、固定したcommit・SHA-256のtrusted root、identity・issuerを用いたnetworkなしのoffline検証、検証失敗時にruntime抽出を開始しないfail-closed動作をStage 6で限定検証する。Stage 6は進行中のため、完了済みStageの再検証は発生しない。
+
+### 限定検証結果
+
+- `cosign v2.6.2`の`cosign-darwin-arm64`について、公式checksumと実測SHA-256 `c01df01bac51714322f17d6416798d8a7b9e903657c6a2f8f09b9aee5ba29f57`の一致を確認した。`version`出力は`v2.6.2`、`darwin/arm64`だった。
+- trusted rootはSigstore公式`root-signing` commit `c9bda74ad2221f938f7d2e0295ca3aad2da710a8`の公式raw版、SHA-256 `6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`を使用した。
+- Python installer、bundle v0.3、identity=`thomas@python.org`、issuer=`https://accounts.google.com`、固定trusted rootをすべて指定し、networkなしのoffline検証で`Verified OK`を確認した。
+- 初回起動時のSIGKILLは`com.apple.quarantine`属性が原因だった。内容SHA-256とcodesign整合性を確認した実行物から同属性だけを削除した後、`version`とoffline検証がPASSした。

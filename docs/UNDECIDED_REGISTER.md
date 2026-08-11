@@ -4,8 +4,6 @@
 
 | 未決定事項 | 決定期限 |
 |---|---|
-| bundled Python exact version/package lock | Stage 6開始Gate |
-| packaged appでの完全offline subprocess | Stage 6開始Gate |
 | source.wav最低品質/長さ条件 | Stage 8A開始Gate |
 | Embedding model/version/preprocess | Stage 8A開始Gate |
 | 複数sample representation更新規則 | Stage 8C開始Gate |
