@@ -21,6 +21,7 @@ enum HomeCharactersState: Equatable {
 
 struct HomeState: Equatable {
     var video: HomeVideoState
+    var outputDirectoryURL: URL? = nil
     var registeredCharacters: [CharacterSummary]
     var selectedCharacterIDs: Set<UUID>
     var isAIModelAvailable: Bool
@@ -397,6 +398,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var characterDeletion = CharacterDeletionState()
     private let preflightService: any PreflightServicing
     private let characterRegistrationService: any CharacterRegistrationServicing
+    private let externalSelectionBookmarks: any ExternalSelectionBookmarkStoring
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
     private var registrationTask: Task<Void, Never>?
@@ -412,16 +414,35 @@ final class AppViewModel: ObservableObject {
         analysisState: AnalysisState = .initial,
         resultsState: ResultsState = .initial,
         preflightService: any PreflightServicing = PreflightService(),
-        characterRegistrationService: any CharacterRegistrationServicing = CharacterRegistrationService()
+        characterRegistrationService: any CharacterRegistrationServicing = CharacterRegistrationService(),
+        externalSelectionBookmarks: any ExternalSelectionBookmarkStoring = ExternalSelectionBookmarkStore()
     ) {
         self.homeState = homeState
         self.analysisState = analysisState
         self.resultsState = resultsState
         self.preflightService = preflightService
         self.characterRegistrationService = characterRegistrationService
+        self.externalSelectionBookmarks = externalSelectionBookmarks
     }
 
     func selectVideo(_ url: URL) {
+        guard externalSelectionBookmarks.save(url, for: .sourceVideo) else {
+            resetVideoSelection()
+            return
+        }
+        beginVideoPreflight(url)
+    }
+
+    func restoreExternalSelections() {
+        homeState.outputDirectoryURL = externalSelectionBookmarks.restore(.outputDirectory)
+        if let sourceVideoURL = externalSelectionBookmarks.restore(.sourceVideo) {
+            beginVideoPreflight(sourceVideoURL)
+        } else {
+            resetVideoSelection()
+        }
+    }
+
+    private func beginVideoPreflight(_ url: URL) {
         preflightTask?.cancel()
         let requestID = UUID()
         currentPreflightRequestID = requestID
@@ -437,6 +458,16 @@ final class AppViewModel: ObservableObject {
         preflightTask?.cancel()
         currentPreflightRequestID = nil
         homeState.video = .failed(message: PreflightErrorCode.internalError.userMessage)
+    }
+
+    func selectOutputDirectory(_ url: URL) {
+        homeState.outputDirectoryURL = externalSelectionBookmarks.save(url, for: .outputDirectory) ? url : nil
+    }
+
+    private func resetVideoSelection() {
+        preflightTask?.cancel()
+        currentPreflightRequestID = nil
+        homeState.video = .unselected
     }
 
     @discardableResult

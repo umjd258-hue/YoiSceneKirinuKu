@@ -5,7 +5,10 @@ struct RootView: View {
 
     var body: some View {
         content
-            .task { appViewModel.reloadRegisteredCharacters() }
+            .task {
+                appViewModel.restoreExternalSelections()
+                appViewModel.reloadRegisteredCharacters()
+            }
     }
 
     @ViewBuilder
@@ -16,6 +19,7 @@ struct RootView: View {
                 state: appViewModel.homeState,
                 onSelectVideo: appViewModel.selectVideo,
                 onVideoSelectionFailed: appViewModel.videoSelectionFailed,
+                onSelectOutputDirectory: appViewModel.selectOutputDirectory,
                 onOpenAnalysis: appViewModel.navigateToAnalysis,
                 onOpenCharacters: appViewModel.navigateToCharacters,
                 draftCharacterIDs: appViewModel.draftCharacterIDs,

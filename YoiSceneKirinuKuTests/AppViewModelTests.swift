@@ -8,6 +8,53 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(subject.homeState.characters, .unregistered)
         XCTAssertTrue(subject.homeState.registeredCharacters.isEmpty)
+        XCTAssertNil(subject.homeState.outputDirectoryURL)
+    }
+
+    func testExplicitOutputDirectorySelectionUpdatesRuntimeState() {
+        let bookmarks = BookmarkStoreStub()
+        let subject = AppViewModel(homeState: .runtimeInitial, externalSelectionBookmarks: bookmarks)
+        let directory = URL(fileURLWithPath: "/tmp/exports", isDirectory: true)
+
+        subject.selectOutputDirectory(directory)
+
+        XCTAssertEqual(subject.homeState.outputDirectoryURL, directory)
+        XCTAssertEqual(bookmarks.saved[.outputDirectory], directory)
+    }
+
+    func testFailedOutputBookmarkRequiresReselection() {
+        let bookmarks = BookmarkStoreStub()
+        bookmarks.saveSucceeds = false
+        let subject = AppViewModel(homeState: .runtimeInitial, externalSelectionBookmarks: bookmarks)
+
+        subject.selectOutputDirectory(URL(fileURLWithPath: "/tmp/exports", isDirectory: true))
+
+        XCTAssertNil(subject.homeState.outputDirectoryURL)
+    }
+
+    func testRestoreExternalSelectionsUsesOnlyValidatedBookmarkURLs() {
+        let bookmarks = BookmarkStoreStub()
+        let output = URL(fileURLWithPath: "/tmp/restored-exports", isDirectory: true)
+        bookmarks.restored[.outputDirectory] = output
+        let subject = AppViewModel(homeState: .runtimeInitial, externalSelectionBookmarks: bookmarks)
+
+        subject.restoreExternalSelections()
+
+        XCTAssertEqual(subject.homeState.outputDirectoryURL, output)
+    }
+
+    func testPermissionLossRequiresOutputDirectoryReselection() {
+        let bookmarks = BookmarkStoreStub()
+        var homeState = HomeState.runtimeInitial
+        homeState.outputDirectoryURL = URL(fileURLWithPath: "/tmp/expired", isDirectory: true)
+        let subject = AppViewModel(
+            homeState: homeState,
+            externalSelectionBookmarks: bookmarks
+        )
+
+        subject.restoreExternalSelections()
+
+        XCTAssertNil(subject.homeState.outputDirectoryURL)
     }
 
     private let conan = CharacterSummary(
@@ -970,6 +1017,22 @@ final class AppViewModelTests: XCTestCase {
             "sequence": sequence,
             "payload": payload,
         ]
+    }
+}
+
+private final class BookmarkStoreStub: ExternalSelectionBookmarkStoring {
+    var saveSucceeds = true
+    var saved = [ExternalSelectionKind: URL]()
+    var restored = [ExternalSelectionKind: URL]()
+
+    func save(_ url: URL, for kind: ExternalSelectionKind) -> Bool {
+        guard saveSucceeds else { return false }
+        saved[kind] = url
+        return true
+    }
+
+    func restore(_ kind: ExternalSelectionKind) -> URL? {
+        restored[kind]
     }
 }
 

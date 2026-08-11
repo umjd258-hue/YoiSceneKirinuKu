@@ -7,6 +7,7 @@ struct HomeView: View {
     let state: HomeState
     let onSelectVideo: (URL) -> Void
     let onVideoSelectionFailed: () -> Void
+    let onSelectOutputDirectory: (URL) -> Void
     let onOpenAnalysis: () -> Bool
     let onOpenCharacters: () -> Bool
     let draftCharacterIDs: Set<UUID>?
@@ -15,6 +16,7 @@ struct HomeView: View {
     let onConfirmCharacterSelection: () -> Void
     let onCancelCharacterSelection: () -> Void
     @State private var isVideoImporterPresented = false
+    @State private var isOutputDirectoryImporterPresented = false
     @State private var isCharacterSelectionPresented = false
 
     var body: some View {
@@ -28,6 +30,7 @@ struct HomeView: View {
 
             VStack(spacing: 16) {
                 videoCard
+                outputDirectoryCard
                 charactersCard
             }
             .frame(maxWidth: 560)
@@ -47,6 +50,11 @@ struct HomeView: View {
                 onSelectVideo(url)
             case .failure:
                 onVideoSelectionFailed()
+            }
+        }
+        .fileImporter(isPresented: $isOutputDirectoryImporterPresented, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result {
+                onSelectOutputDirectory(url)
             }
         }
         .sheet(isPresented: $isCharacterSelectionPresented) {
@@ -93,6 +101,20 @@ struct HomeView: View {
 
     private func videoSelectionButton(_ title: String) -> some View {
         Button(title) { isVideoImporterPresented = true }
+    }
+
+    private var outputDirectoryCard: some View {
+        HomeCard(title: "出力先") {
+            if let outputDirectoryURL = state.outputDirectoryURL {
+                Text(outputDirectoryURL.lastPathComponent)
+                    .font(.headline)
+                Button("変更") { isOutputDirectoryImporterPresented = true }
+            } else {
+                Text("出力先を選んでください")
+                    .foregroundStyle(.secondary)
+                Button("フォルダを選ぶ") { isOutputDirectoryImporterPresented = true }
+            }
+        }
     }
 
     private var charactersCard: some View {
