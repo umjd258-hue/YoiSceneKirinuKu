@@ -46,6 +46,17 @@
 - push/認証エラー時は追加修正せず停止。
 - 各Stage後に `docs/CURRENT_STATUS.md` を更新して共有する。
 
+### 利用上限節約モードでの `git add`
+- 直前にユーザーが承認した変更対象ファイルだけを、ファイル名で明示指定する場合に限り、追加承認なしで `git add` を実行してよい。
+- 実行前に `git diff` 等で対象外変更の混入がなく、既存の未コミット変更を含めないことを確認する。
+- `git add .`、`git add -A`、ディレクトリ単位のstage、未承認ファイルを含むstage、対象が曖昧なstageは禁止する。
+- stage後は追加承認なしでcached差分、stage対象ファイル、対象外ファイルの混入、意図しない差分の有無を読み取り専用で確認してよい。
+- 対象外ファイルまたは想定外差分を検出した場合は、追加作業をせず即停止して報告する。
+- 権限制約、コマンド失敗、その他の理由でstageに失敗した場合は、自動再試行せず停止して報告する。
+
+### 引き続き事前承認が必要なGit操作
+- `git commit`、`git push`、`git reset`、`git checkout`、`git restore`、`git clean`、`git merge`、`git rebase`、branch削除、tag作成・削除、force push、およびその他の履歴・作業ツリー・リモート状態を書き換える危険な操作は、必ず実行前にユーザー承認を得る。
+
 ## ChatGPT ↔ GitHub ↔ Codex
 - GitHubを会話間の正本共有場所とする。
 - Codex: 実装・検証・記録・commit・push。
