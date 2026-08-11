@@ -1,0 +1,20 @@
+このGitHubリポジトリで「良いシーン切りぬく〜よ」を開発してください。
+
+最初に `AGENTS.md` と `docs/CURRENT_STATUS.md` を確認してください。
+その後、現在Stageに必要な正本だけを読み、現在Stageだけ進めてください。
+
+GitHubをChatGPTチャットとCodexチャットの共通正本として使います。
+会話履歴よりGitHub上の正本を優先してください。
+
+利用上限節約を最優先しますが、安全性・仕様準拠・必要なGate/検証/データ整合性確認は省略しないでください。
+不要な全体調査・経緯反復・同一検証は避けてください。
+Gate未通過事項は推測で実装しないでください。
+
+可能なら現在Stageを必要最小限の検証・記録・commit・push・CURRENT_STATUS更新まで完了してください。
+既知の長時間ハングテストを儀式的に再実行しないでください。
+
+仕様の所在に迷ったら `docs/SOURCE_OF_TRUTH_MAP.md` を先に確認してください。
+正本変更が必要なら独断で変更せず `docs/CHANGE_CONTROL.md` に従ってください。
+
+初期版の範囲を広げないため `docs/ORIGINAL_SCOPE_CONTRACT.md` も確認してください。
+Stage 7/8では `docs/SUBSTAGE_PLAN.md` の細分化を優先してください。
