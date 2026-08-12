@@ -310,7 +310,17 @@ struct ResultsView: View {
     let onReturnHome: () -> Bool
 
     var body: some View {
-        if state.candidateCount == 0 {
+        if let error = state.loadError {
+            VStack(spacing: 12) {
+                Label(error.userMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                Text(error.nextAction)
+                    .foregroundStyle(.secondary)
+                Button("ホームへ戻る") { onReturnHome() }
+            }
+            .frame(minWidth: 720, minHeight: 520)
+            .padding(32)
+        } else if state.candidateCount == 0 {
             VStack(spacing: 20) {
                 Text("今回は条件に合う場面が見つかりませんでした。")
                     .font(.title2)
@@ -414,8 +424,8 @@ struct ResultsView: View {
                 Divider()
                 LabeledContent("人物一致", value: candidate.characterMatch.title)
                 LabeledContent("品質", value: "\(candidate.quality.symbol) \(candidate.quality.title)")
-                if let qualityReason = candidate.qualityReason {
-                    Text(qualityReason)
+                if !candidate.qualityReasons.isEmpty {
+                    Text(candidate.qualityReasons.joined(separator: ", "))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

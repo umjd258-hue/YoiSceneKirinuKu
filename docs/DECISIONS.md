@@ -2019,3 +2019,55 @@ Stage 16、17。Stage 15および既存VAD/candidate境界の意味は変更し�
 ### 再検証範囲
 
 人工sampleによるraw値、算出不能の明示、入力欠落、3秒境界、strict schema、fingerprint再利用、Python限定テスト、Swift IPC parser、Debug buildを対象とする。Stage 15Aと完了済みStageは再検証しない。
+## 2026-08-12：Stage 18 MVP strict result.json契約・完了
+
+### 問題
+
+Stage 13・15・17の正式成果物をStage 19が安全に読める最小`result.json`へ統合するschema、ownership、順序、正式化・再利用契約が未確定だった。
+
+### 根拠
+
+候補IDと整数ms境界はStage 12、人物／unknownはStage 15、品質labelとreasonはStage 17が既に所有するため、Stage 18で新しい判定値を追加せず合成できる。
+
+### 変更内容・決定
+
+- Python Result Serviceが正式`speaker_candidates.json`、`speaker_decisions.json`、`quality_decisions.json`のstrict検証とSHA-256 fingerprint、生成、partial検証、atomic rename、同一入力再利用を所有する。
+- `result.json`はschema version 1、contract `stage18-result-v1`、job ID、入力fingerprint、candidate配列だけを持つ。candidateはID、整数ms境界、人物／unknown、match reason・score、品質label・reasonだけを持つ。
+- 並び順は`start_ms`、`end_ms`、`candidate_id`の昇順とする。入力欠損、stale、不正、未知項目、既存result不整合はfail-closedのstable errorとする。
+- UI選択状態とpreview状態は保存せず、Stage 19・20がread-only resultとsourceから所有する。
+
+### 影響正本
+
+`DATA_CONTRACTS.md`、`ARCHITECTURE.md`、`IMPLEMENTATION_STEPS.md`、`CURRENT_STATUS.md`、`DECISIONS.md`。
+
+### 影響Stage
+
+Stage 18およびconsumerのStage 19〜22。Stage 1〜17のproducer契約は変更しない。
+
+### 再検証範囲
+
+Stage 18のstrict schema、決定論的sort、人物／unknown、品質、欠損・不正、fingerprint再利用、原子的正式化、stable error、Swift IPCとDebug buildだけを限定検証する。
+
+---
+
+## 2026-08-12：Stage 19 正式結果一覧接続
+
+### 問題
+既存Results UIはmock candidateと複数選択を使用し、Stage 18の正式`result.json`、fingerprint stale、candidate IDを検証していなかった。
+
+### 根拠
+Stage 18がschema、判定、品質、整数ms境界と順序を所有済みであり、Stage 19は解析値を変更しないread-only consumerとして最小接続できる。
+
+### 変更内容
+- Swift Serviceがroot/candidateのexact key、schema v1、job ID、contract version、3入力の`algorithm/byte_count/digest` fingerprint、candidate ID、人物ID、品質、整数ms境界と順序をstrict検証する。
+- 人物groupは`result.json`で最初に現れる順、group内candidateは正式順を維持する。未登録人物ID、欠損、不正、fingerprint不一致はstable errorと再解析案内へfail-closedとする。
+- UI選択は最大1件の一時状態とし、選択candidate全体をStage 20へ渡せる。解析値、一括選択・export、高度filter/sort、previewはStage 19に含めない。
+
+### 影響正本
+`PRODUCT_SPEC.md`、`UI_SPEC.md`、`DATA_CONTRACTS.md`、`ARCHITECTURE.md`、`IMPLEMENTATION_STEPS.md`、`GATE_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+Stage 19。Stage 18 producerは変更せず、Stage 20が選択candidateをconsumerとして使用する。
+
+### 再検証範囲
+strict schema、fingerprint stale、決定論的group・candidate順、人物／unknown、品質、単一選択、stable error、Swift UI state、Debug build、`git diff --check`。

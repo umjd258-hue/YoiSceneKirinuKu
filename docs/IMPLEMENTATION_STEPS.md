@@ -167,22 +167,22 @@ Tests: 誤分類傾向記録。
 Done: 品質判定を正本化。
 
 ## Stage 18: result.json生成
-Gate: result schema、grouping/sort、unknown/quality表示、ownershipを確定。
-Input: matches + quality + candidates。
+Gate: strict schema、入力owner、人物／unknown・品質・整数ms境界、決定論的sort、原子的正式化・再利用・stale拒否を確定。
+Input: 正式`speaker_candidates.json` + `speaker_decisions.json` + `quality_decisions.json`。
 Output: result.json。
-Scope: 最終解析結果統合。
+Scope: `stage18-result-v1`への最終解析結果統合。Python Serviceが生成・検証・fingerprint再利用・原子的正式化を所有する。
 Forbidden: UI選択状態との責務混同。
-Tests: schema、sort、unknown、欠損。
+Tests: strict schema、sort、人物／unknown、品質、欠損・stale・不正、再利用、stable error、Swift IPC。
 Done: UIがstrictに読める。
 
 ## Stage 19: 結果一覧UI
-Gate: UI表示契約を確認。
+Gate: Stage 18 strict schemaのread-only検証、入力fingerprint照合、人物group順、単一選択、stable errorと次行動を確認。
 Input: result.json。
 Output: 人物別結果一覧。
-Scope: grouping、折りたたみ、品質/時刻/選択。
-Forbidden: 解析ロジック。
-Tests: UI/state。
-Done: 候補を安全に閲覧/選択可能。
+Scope: candidate IDを維持したgrouping、人物／unknown、品質、整数ms時刻、最大1件の選択とStage 20への受渡し。
+Forbidden: 解析ロジック、一括選択・一括export、高度filter/sort、全件折りたたみ、Stage 20 preview実装。
+Tests: strict schema、fingerprint stale、決定論的表示順、人物／unknown、単一選択、stable error、UI/state。
+Done: 正式候補をfail-closedで閲覧し、1件を安全に選択可能。
 
 ## Stage 20: AVPlayerプレビュー
 Gate: seek精度、候補区間境界、再生停止挙動を確認。

@@ -24,6 +24,8 @@
 | Stage 15 | 実人物閾値を根拠付き決定可能 | match/unknown/表示変換 | 代表的ラベル付き実人物データ | 13 |
 | Stage 16 | raw quality featureを安定生成可能 | 3〜30秒・最大480,000 sample・1 pass/candidateのPCM・VAD客観値、他話者/BGM/SEの`unavailable`、欠損理由、ownerはPython Service | 人工sampleで再現性・欠損・短区間・再利用・strict schemaを限定検証 | 12 |
 | Stage 17 | 品質閾値を根拠付き決定可能 | feature→quality規則 | 代表的音声で誤判定確認 | 16 |
+| Stage 18 | strict resultを安全に正式化可能 | schema v1、owner、candidate ID、人物／unknown、品質、整数ms、sort、partial、再利用 | strict schema、stale、欠損、不正、原子的正式化、stable error | 12-17 |
+| Stage 19 | 正式resultを安全に閲覧・単一選択可能 | read-only strict検証、fingerprint照合、人物group順、単一選択、次行動 | schema、stale、順序、人物／unknown、品質、選択、UI state | 18 |
 | Stage 21 | export品質/互換性を決定可能 | copy/reencode/codec | keyframe/音ズレ/品質 | 18-20 |
 | Stage 22 | SD保存を安全にfinalize可能 | bookmark/volume方式の維持・再検証、collision/naming | 抜去/容量不足/partial/retry | 21 |
 | Stage 25 | 性能値を実測可能 | 測定方法 | 長尺/peak memory/disk/UI | 23-24 |

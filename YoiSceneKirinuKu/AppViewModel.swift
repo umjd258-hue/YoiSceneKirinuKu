@@ -126,10 +126,10 @@ enum AnalysisState: Equatable {
     ))
 }
 
-enum ResultQuality: Equatable, CaseIterable {
+enum ResultQuality: String, Equatable, CaseIterable {
     case excellent
     case good
-    case needsReview
+    case needsReview = "needs_review"
 
     var symbol: String {
         switch self {
@@ -151,14 +151,12 @@ enum ResultQuality: Equatable, CaseIterable {
 }
 
 enum CharacterMatchDisplay: Equatable {
-    case high
-    case medium
+    case matched
     case unknown
 
     var title: String {
         switch self {
-        case .high: "高い"
-        case .medium: "中程度"
+        case .matched: "一致"
         case .unknown: "人物不明"
         }
     }
@@ -166,11 +164,12 @@ enum CharacterMatchDisplay: Equatable {
 
 struct ResultCandidate: Identifiable, Equatable {
     let id: UUID
+    let candidateID: String
     let startMilliseconds: Int64
     let durationMilliseconds: Int64
     let quality: ResultQuality
     let characterMatch: CharacterMatchDisplay
-    let qualityReason: String?
+    let qualityReasons: [String]
 
     var endMilliseconds: Int64 { startMilliseconds + durationMilliseconds }
 }
@@ -197,12 +196,14 @@ struct ResultsState: Equatable {
     var selection: ResultSelectionState
     var focusedCandidateID: UUID?
     var expandedGroupIDs: Set<ResultGroupID>
+    var loadError: ResultListErrorCode?
 
     static let empty = ResultsState(
         groups: [],
         selection: ResultSelectionState(selectedCandidateIDs: []),
         focusedCandidateID: nil,
-        expandedGroupIDs: []
+        expandedGroupIDs: [],
+        loadError: nil
     )
 
     static let initial: ResultsState = {
@@ -217,32 +218,38 @@ struct ResultsState: Equatable {
 
         let groups = [
             ResultGroup(id: .character(conanID), title: "コナン", candidates: [
-                ResultCandidate(id: excellentID, startMilliseconds: 192_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .high, qualityReason: nil),
-                ResultCandidate(id: goodID, startMilliseconds: 521_000, durationMilliseconds: 6_000, quality: .good, characterMatch: .high, qualityReason: "背景音がやや強い。"),
-                ResultCandidate(id: reviewID, startMilliseconds: 680_000, durationMilliseconds: 3_000, quality: .needsReview, characterMatch: .medium, qualityReason: "声が小さい。"),
+                ResultCandidate(id: excellentID, candidateID: "candidate_\(excellentID.uuidString.lowercased())", startMilliseconds: 192_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .matched, qualityReasons: []),
+                ResultCandidate(id: goodID, candidateID: "candidate_\(goodID.uuidString.lowercased())", startMilliseconds: 521_000, durationMilliseconds: 6_000, quality: .good, characterMatch: .matched, qualityReasons: ["noise"]),
+                ResultCandidate(id: reviewID, candidateID: "candidate_\(reviewID.uuidString.lowercased())", startMilliseconds: 680_000, durationMilliseconds: 3_000, quality: .needsReview, characterMatch: .matched, qualityReasons: ["low_level"]),
             ]),
             ResultGroup(id: .character(ranID), title: "蘭", candidates: [
-                ResultCandidate(id: ranGoodID, startMilliseconds: 744_000, durationMilliseconds: 5_000, quality: .good, characterMatch: .medium, qualityReason: nil),
+                ResultCandidate(id: ranGoodID, candidateID: "candidate_\(ranGoodID.uuidString.lowercased())", startMilliseconds: 744_000, durationMilliseconds: 5_000, quality: .good, characterMatch: .matched, qualityReasons: []),
             ]),
             ResultGroup(id: .unknown, title: "人物不明", candidates: [
-                ResultCandidate(id: unknownExcellentID, startMilliseconds: 820_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .unknown, qualityReason: nil),
-                ResultCandidate(id: unknownReviewID, startMilliseconds: 900_000, durationMilliseconds: 2_000, quality: .needsReview, characterMatch: .unknown, qualityReason: "短い発話です。"),
+                ResultCandidate(id: unknownExcellentID, candidateID: "candidate_\(unknownExcellentID.uuidString.lowercased())", startMilliseconds: 820_000, durationMilliseconds: 4_000, quality: .excellent, characterMatch: .unknown, qualityReasons: []),
+                ResultCandidate(id: unknownReviewID, candidateID: "candidate_\(unknownReviewID.uuidString.lowercased())", startMilliseconds: 900_000, durationMilliseconds: 2_000, quality: .needsReview, characterMatch: .unknown, qualityReasons: ["short_or_boundary"]),
             ]),
         ]
         let selected = Set(groups.flatMap(\.candidates).filter { candidate in
             candidate.quality.isInitiallySelected && candidate.characterMatch != .unknown
-        }.map(\.id))
+        }.prefix(1).map(\.id))
         return ResultsState(
             groups: groups,
             selection: ResultSelectionState(selectedCandidateIDs: selected),
             focusedCandidateID: groups.first?.candidates.first?.id,
-            expandedGroupIDs: [.character(conanID), .character(ranID)]
+            expandedGroupIDs: [.character(conanID), .character(ranID)],
+            loadError: nil
         )
     }()
 
     var candidateCount: Int { groups.reduce(0) { $0 + $1.candidates.count } }
     var selectedCandidateIDs: Set<UUID> { selection.selectedCandidateIDs }
     var selectedCount: Int { selection.selectedCandidateIDs.count }
+
+    var selectedCandidate: ResultCandidate? {
+        guard let id = selection.selectedCandidateIDs.first else { return nil }
+        return groups.lazy.flatMap(\.candidates).first { $0.id == id }
+    }
 
     var focusedCandidate: ResultCandidate? {
         groups.lazy.flatMap(\.candidates).first { $0.id == focusedCandidateID }
@@ -399,6 +406,7 @@ final class AppViewModel: ObservableObject {
     private let preflightService: any PreflightServicing
     private let characterRegistrationService: any CharacterRegistrationServicing
     private let externalSelectionBookmarks: any ExternalSelectionBookmarkStoring
+    private let resultListService: any ResultListLoading
     private var preflightTask: Task<Void, Never>?
     private var currentPreflightRequestID: UUID?
     private var registrationTask: Task<Void, Never>?
@@ -415,7 +423,8 @@ final class AppViewModel: ObservableObject {
         resultsState: ResultsState = .initial,
         preflightService: any PreflightServicing = PreflightService(),
         characterRegistrationService: any CharacterRegistrationServicing = CharacterRegistrationService(),
-        externalSelectionBookmarks: any ExternalSelectionBookmarkStoring = ExternalSelectionBookmarkStore()
+        externalSelectionBookmarks: any ExternalSelectionBookmarkStoring = ExternalSelectionBookmarkStore(),
+        resultListService: any ResultListLoading = ResultListService()
     ) {
         self.homeState = homeState
         self.analysisState = analysisState
@@ -423,6 +432,7 @@ final class AppViewModel: ObservableObject {
         self.preflightService = preflightService
         self.characterRegistrationService = characterRegistrationService
         self.externalSelectionBookmarks = externalSelectionBookmarks
+        self.resultListService = resultListService
     }
 
     func selectVideo(_ url: URL) {
@@ -535,7 +545,7 @@ final class AppViewModel: ObservableObject {
         if resultsState.selection.selectedCandidateIDs.contains(candidateID) {
             resultsState.selection.selectedCandidateIDs.remove(candidateID)
         } else {
-            resultsState.selection.selectedCandidateIDs.insert(candidateID)
+            resultsState.selection.selectedCandidateIDs = [candidateID]
         }
     }
 
@@ -977,6 +987,24 @@ final class AppViewModel: ObservableObject {
     @discardableResult
     func navigateToResults() -> Bool {
         transition(from: .analysis, to: .results)
+    }
+
+    @discardableResult
+    func loadResults(jobID: UUID) -> Bool {
+        guard route == .analysis else { return false }
+        switch resultListService.load(jobID: jobID, characters: homeState.registeredCharacters) {
+        case .success(let state):
+            resultsState = state
+        case .failure(let code):
+            resultsState = ResultsState(
+                groups: [],
+                selection: .init(selectedCandidateIDs: []),
+                focusedCandidateID: nil,
+                expandedGroupIDs: [],
+                loadError: code
+            )
+        }
+        return transition(from: .analysis, to: .results)
     }
 
     @discardableResult

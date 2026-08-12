@@ -179,7 +179,7 @@ def read_json(path: Path, code: str) -> dict[str, Any]:
 JOB_DIRECTORY_ITEMS = {
     "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
     "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
-    "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json",
+    "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json", "result.json",
 }
 
 
@@ -368,7 +368,7 @@ def recover_job(workspace: Path) -> dict[str, Any]:
     allowed = {
         "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
         "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
-        "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json",
+        "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json", "result.json",
     }
     if {item.name for item in current.iterdir()} - allowed:
         raise JobFailure("job_workspace_invalid")
@@ -420,7 +420,7 @@ def resume_job(
     allowed = {
         "job.json", "analysis.wav", "analysis_audio.json", "vad.json",
         "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
-        "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json",
+        "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json", "result.json",
     }
     for item in current.iterdir():
         if item.name not in allowed or item.is_symlink() or not item.is_file():

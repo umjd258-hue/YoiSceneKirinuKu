@@ -405,7 +405,7 @@ final class AppViewModelTests: XCTestCase {
             $0.characterMatch != .unknown && $0.quality == .needsReview
         })
 
-        XCTAssertEqual(state.selectedCandidateIDs, Set(knownExcellentOrGood.map(\.id)))
+        XCTAssertEqual(state.selectedCandidateIDs, Set(knownExcellentOrGood.prefix(1).map(\.id)))
         XCTAssertFalse(state.selectedCandidateIDs.contains(unknownExcellent.id))
         XCTAssertFalse(state.selectedCandidateIDs.contains(knownReview.id))
         XCTAssertEqual(unknownExcellent.quality, .excellent)
@@ -415,16 +415,16 @@ final class AppViewModelTests: XCTestCase {
     func testResultSelectionCountChangesOnlyForExistingCandidates() throws {
         let subject = AppViewModel()
         let candidate = try XCTUnwrap(subject.resultsState.groups.flatMap(\.candidates).first)
-        let initialCount = subject.resultsState.selectedCount
+        let second = try XCTUnwrap(subject.resultsState.groups.flatMap(\.candidates).dropFirst().first)
 
         subject.toggleResultSelection(candidate.id)
-        XCTAssertEqual(subject.resultsState.selectedCount, initialCount - 1)
+        XCTAssertEqual(subject.resultsState.selectedCount, 0)
 
-        subject.toggleResultSelection(candidate.id)
-        XCTAssertEqual(subject.resultsState.selectedCount, initialCount)
+        subject.toggleResultSelection(second.id)
+        XCTAssertEqual(subject.resultsState.selectedCandidateIDs, [second.id])
 
         subject.toggleResultSelection(UUID())
-        XCTAssertEqual(subject.resultsState.selectedCount, initialCount)
+        XCTAssertEqual(subject.resultsState.selectedCandidateIDs, [second.id])
     }
 
     func testResultFocusAndGroupExpansionRejectUnknownIDs() throws {
@@ -457,20 +457,22 @@ final class AppViewModelTests: XCTestCase {
     func testResultUIModelContainsLabelsInsteadOfRawAIScores() {
         let candidateMirrorLabels = Set(Mirror(reflecting: ResultCandidate(
             id: UUID(),
+            candidateID: "candidate_00000000-0000-0000-0000-000000000000",
             startMilliseconds: 0,
             durationMilliseconds: 1_000,
             quality: .good,
-            characterMatch: .medium,
-            qualityReason: nil
+            characterMatch: .matched,
+            qualityReasons: []
         )).children.compactMap(\.label))
 
         XCTAssertEqual(candidateMirrorLabels, [
             "id",
+            "candidateID",
             "startMilliseconds",
             "durationMilliseconds",
             "quality",
             "characterMatch",
-            "qualityReason",
+            "qualityReasons",
         ])
         XCTAssertFalse(candidateMirrorLabels.contains(where: { $0.lowercased().contains("score") }))
         XCTAssertFalse(candidateMirrorLabels.contains(where: { $0.lowercased().contains("probability") }))

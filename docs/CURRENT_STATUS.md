@@ -6,12 +6,12 @@
 
 ## 現在位置
 
-- Current Stage: Stage 16
+- Current Stage: Stage 19
 - Current Substage: なし
 - State: Completed
-- Current Purpose: Stage 15延期中の非依存作業としてraw quality feature基盤を完了する
-- Last Confirmed HEAD: `2c02aef96a3a3d6b9351f893e710dc96726f3bb9`
-- Next Action: Stage 16変更をcommit対象として分離確認する。
+- Current Purpose: Stage 19正式結果一覧接続の完了
+- Last Confirmed HEAD: `476539cb331fc26eb8760f3e13cfeb776b914bf8`
+- Next Action: Stage 20 AVPlayerプレビューの開始Gateを正式確認する。
 
 ## Stage別復元結果
 
@@ -36,11 +36,12 @@
 | Stage 12 候補区間生成 | Completed | `e1b5c1c`、`146c58c`、`CandidateGeneration.swift`、`candidate_generation.py`、安定ID・復旧テストが存在 |
 | Stage 13 Speaker Matching基盤 | Completed | `eb213aa`、`1a1aeda`、`30903e8`、`SpeakerMatching.swift`、`speaker_matching.py`、raw score生成テストが存在 |
 | Stage 14 協調停止 | Completed | `e3ac006`、`947de8d`、`AnalysisStopping.swift`、`analysis_stopping.py`、process group停止実験が存在 |
-| Stage 15 人物一致・人物不明・表示閾値 | Blocked | `53a6e8b`。代表性あるラベル付き実人物データ不足のため、人物一致閾値・unknown rule・表示変換を根拠付きで決定できない |
+| Stage 15 人物一致・人物不明・表示閾値 | Completed | 保存済み630ペアからMVP暫定技術3値を決定論的に再現。unknown優先、複数accept候補、model不一致、stale、欠損・不正、deterministic、stable error codeと最小Swift接続を限定検証済み。実人物FAR/FRRは未検証・保証なし |
+| Stage 15A calibration用cluster生成ローカル開発tool | Completed | 36候補・192次元Embedding・630ペアでcomplete-linkageを限定検証。人手確認で混在5/5を排除し、同一1/2を維持。clustering閾値0.6588の直接転用は禁止 |
 | Stage 16 品質評価基盤 | Completed | PCM/VAD由来raw quality feature、観測不能カテゴリの理由付きunavailable、strict schema、fingerprint再利用、原子的正式化、Swift Service連携を限定検証済み |
-| Stage 17 品質判定契約 | Not started | ラベル付き品質データによる閾値・表示変換の正式記録が存在しない |
-| Stage 18 result.json生成 | Not started | 現行schemaに基づく正式 `result.json` 生成実装が存在しない |
-| Stage 19 結果一覧UI | Partial | mock UI `4a05dec`、`d2cdff3` と `ResultsView` は存在するが、正式 `result.json` consumerではない |
+| Stage 17 品質判定契約 | Completed | Stage 16 raw featureと分離したstrict人手補助入力、欠落・不正・uncertainの△、原子的正式化・再利用、Swift Service連携を実装。固定validation 12件は危険側誤差0、完全一致12/12でPASS |
+| Stage 18 result.json生成 | Completed | 正式candidate・人物decision・quality decisionをstrict検証し、整数ms境界、人物／unknown、品質を決定論的順序で統合。fingerprint再利用、stale・欠損・不正のfail-closed、partialからの原子的正式化、Swift Service接続を限定検証済み |
+| Stage 19 結果一覧UI | Completed | Stage 18 strict `result.json`のread-only検証、3入力fingerprint照合、candidate ID・決定論的順序の維持、人物／unknown・品質・整数ms表示、単一選択、stable errorと次行動を限定検証済み |
 | Stage 20 AVPlayerプレビュー | Not started | 人物登録用AVPlayerは存在するが、結果candidate境界のpreview完了条件を満たさない |
 | Stage 21 高品質切り抜き | Not started | user-selected rangeの正式export実装が存在しない |
 | Stage 22 出力正式化・復旧 | Not started | export partialの検証・atomic finalize実装が存在しない |
@@ -52,8 +53,12 @@
 
 ## Blocker・未決定事項
 
-- Stage 15: 代表性あるラベル付き実人物データが不足している。人工音声2話者の値から人物一致閾値、人物不明判定、表示変換を推測しない。
+- Stage 15はMVP暫定技術GateとしてCompleted。実人物精度は未検証でFAR/FRR保証がなく、false accept回避を優先してfalse reject増加を許容する。将来の実人物validationはMVP Release Gate外とする。
+- Stage 15Aのclustering閾値0.6588は人物一致閾値へ直接転用していない。人手確認済み630ペアの最大混在値と最大same値の保守的境界だけをStage 15限定calibrationに使用した。
+- Stage 18・19はCompleted。Stage 19は`result.json`のread-only consumerと単一選択の一時状態だけを所有し、解析判定を変更しない。
+- Stage 19はCompleted。選択candidateを一時状態としてStage 20へ渡せるが、preview再生はまだ実装しない。
 - Stage 16開始Gate・実装・限定検証はPASS。Stage 15の人物閾値を参照せず、Stage 17の品質閾値を先行決定しない。
+- Stage 17はCompleted。追加modelを導入せず、Stage 16で観測不能な項目だけをstrict人手補助入力で補い、欠落・不正・uncertainは△へfail-closedとする。固定validationは完全一致12/12、危険側誤差0でPASS。
 - Stage 3開始Gate: PASS。初期版App Sandbox無効、外部ストレージはユーザー明示選択のみ、bookmark永続化とfail-closed再選択を正式決定。
 - Stage 6開始Gate: PASS。Python 3.13.14のBundle同梱起動、strict JSON Lines、stdout/stderr分離、audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用を限定検証済み。`lsof -i`は連続監視ではない。
 - Stage 7A: PASS。FFmpeg 8.1.2 universal2 build、固定SHA、署名、固定位置相当からのoffline起動を限定検証済み。
@@ -64,7 +69,7 @@
 ## 既存未コミット変更
 
 - `CURRENT_STATUS.md`以外にも仕様文書・参考画像等の未コミット変更が存在する。
-- `DECISIONS.md` はHEADの過去43記録を完全保持する形で復元済みであり、既存技術判断とStage 15保留理由は維持されている。
+- `DECISIONS.md` はHEADの過去43記録を完全保持する形で復元済みであり、既存技術判断と、実人物52 sampleをMVP必須としないStage 15 Completedの決定は維持されている。
 - その他の未コミット変更を正しいと仮定せず、監査・適用範囲が確定するまでstage、commit、削除を行わない。
 
 ## 検証範囲

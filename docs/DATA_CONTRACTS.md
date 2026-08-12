@@ -85,13 +85,11 @@ candidateのpadding/merge/split条件を保存する。
 - final label
 
 ## result.json
-- candidate_id
-- character_id or unknown
-- start_ms/end_ms
-- match display
-- quality display
-- preview metadata
-- export selectionのownershipはUI状態と永続結果を分離して定義
+- rootは`schema_version: 1`、`job_id`、`contract_version: stage18-result-v1`、入力3成果物のSHA-256 fingerprint、`candidates`だけを持つstrict JSONとする。
+- candidateは`candidate_id`、整数`start_ms`／`end_ms`、`match`（`matched`／`unknown`）、nullable `character_id`、`match_reason`、nullable `top_similarity`、`quality`（`excellent`／`good`／`needs_review`）、`quality_reasons`だけを持つ。
+- candidateは`start_ms`、`end_ms`、`candidate_id`の昇順で決定論的に並べる。
+- previewはsource動画と整数ms境界からStage 20が導出し、export selectionはStage 19 UI状態が所有する。どちらも`result.json`へ永続化しない。
+- Stage 19は3入力fingerprintを現行正式成果物と照合してからread-onlyで読み込み、candidate IDとStage 18の順序を変更しない。人物groupは最初に現れるcandidate順、group内は`result.json`順とし、UI選択は最大1件の一時状態とする。
 
 ## migration
 schema version変更時は、
