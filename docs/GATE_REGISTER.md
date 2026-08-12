@@ -22,6 +22,7 @@
 | Stage 13 | speaker scoreが再現可能 | model/preprocess/score | same/different synthetic/basic cost | 8A-8C,12 |
 | Stage 14 | 協調停止が安全 | stop ownership/poll/safe boundary | Python/FFmpeg停止、partial | 10-13 |
 | Stage 15 | 実人物閾値を根拠付き決定可能 | match/unknown/表示変換 | 代表的ラベル付き実人物データ | 13 |
+| Stage 16 | raw quality featureを安定生成可能 | 3〜30秒・最大480,000 sample・1 pass/candidateのPCM・VAD客観値、他話者/BGM/SEの`unavailable`、欠損理由、ownerはPython Service | 人工sampleで再現性・欠損・短区間・再利用・strict schemaを限定検証 | 12 |
 | Stage 17 | 品質閾値を根拠付き決定可能 | feature→quality規則 | 代表的音声で誤判定確認 | 16 |
 | Stage 21 | export品質/互換性を決定可能 | copy/reencode/codec | keyframe/音ズレ/品質 | 18-20 |
 | Stage 22 | SD保存を安全にfinalize可能 | bookmark/volume方式の維持・再検証、collision/naming | 抜去/容量不足/partial/retry | 21 |

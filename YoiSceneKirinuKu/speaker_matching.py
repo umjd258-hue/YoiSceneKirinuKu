@@ -246,7 +246,7 @@ def run(request: dict[str, Any], model_directory: Path, emitter: Emitter, embedd
         current = workspace / "current_job"
         if not current.is_dir() or current.is_symlink():
             raise MatchingFailure("speaker_matching_job_invalid")
-        allowed = {"job.json", "stop.requested", "analysis.wav", "analysis_audio.json", "vad.json", "speaker_candidates.json", "speaker_matches.json"}
+        allowed = {"job.json", "stop.requested", "analysis.wav", "analysis_audio.json", "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json"}
         if {item.name for item in current.iterdir()} - allowed:
             raise MatchingFailure("speaker_matching_job_invalid")
         try:

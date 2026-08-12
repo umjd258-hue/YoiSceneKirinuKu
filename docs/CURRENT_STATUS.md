@@ -6,12 +6,12 @@
 
 ## 現在位置
 
-- Current Stage: Stage 10
+- Current Stage: Stage 16
 - Current Substage: なし
 - State: Completed
-- Current Purpose: 解析ジョブ統合基盤
+- Current Purpose: Stage 15延期中の非依存作業としてraw quality feature基盤を完了する
 - Last Confirmed HEAD: `2c02aef96a3a3d6b9351f893e710dc96726f3bb9`
-- Next Action: Stage 10変更のcommit対象を既存未コミット差分から分離する。
+- Next Action: Stage 16変更をcommit対象として分離確認する。
 
 ## Stage別復元結果
 
@@ -37,7 +37,7 @@
 | Stage 13 Speaker Matching基盤 | Completed | `eb213aa`、`1a1aeda`、`30903e8`、`SpeakerMatching.swift`、`speaker_matching.py`、raw score生成テストが存在 |
 | Stage 14 協調停止 | Completed | `e3ac006`、`947de8d`、`AnalysisStopping.swift`、`analysis_stopping.py`、process group停止実験が存在 |
 | Stage 15 人物一致・人物不明・表示閾値 | Blocked | `53a6e8b`。代表性あるラベル付き実人物データ不足のため、人物一致閾値・unknown rule・表示変換を根拠付きで決定できない |
-| Stage 16 品質評価基盤 | Not started | raw quality featureの正式実装・成果物が存在しない |
+| Stage 16 品質評価基盤 | Completed | PCM/VAD由来raw quality feature、観測不能カテゴリの理由付きunavailable、strict schema、fingerprint再利用、原子的正式化、Swift Service連携を限定検証済み |
 | Stage 17 品質判定契約 | Not started | ラベル付き品質データによる閾値・表示変換の正式記録が存在しない |
 | Stage 18 result.json生成 | Not started | 現行schemaに基づく正式 `result.json` 生成実装が存在しない |
 | Stage 19 結果一覧UI | Partial | mock UI `4a05dec`、`d2cdff3` と `ResultsView` は存在するが、正式 `result.json` consumerではない |
@@ -53,6 +53,7 @@
 ## Blocker・未決定事項
 
 - Stage 15: 代表性あるラベル付き実人物データが不足している。人工音声2話者の値から人物一致閾値、人物不明判定、表示変換を推測しない。
+- Stage 16開始Gate・実装・限定検証はPASS。Stage 15の人物閾値を参照せず、Stage 17の品質閾値を先行決定しない。
 - Stage 3開始Gate: PASS。初期版App Sandbox無効、外部ストレージはユーザー明示選択のみ、bookmark永続化とfail-closed再選択を正式決定。
 - Stage 6開始Gate: PASS。Python 3.13.14のBundle同梱起動、strict JSON Lines、stdout/stderr分離、audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用を限定検証済み。`lsof -i`は連続監視ではない。
 - Stage 7A: PASS。FFmpeg 8.1.2 universal2 build、固定SHA、署名、固定位置相当からのoffline起動を限定検証済み。

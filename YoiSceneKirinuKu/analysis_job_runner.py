@@ -178,7 +178,7 @@ def read_json(path: Path, code: str) -> dict[str, Any]:
 
 JOB_DIRECTORY_ITEMS = {
     "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
-    "vad.json", "speaker_candidates.json", "speaker_matches.json",
+    "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
 }
 
 
@@ -366,7 +366,7 @@ def recover_job(workspace: Path) -> dict[str, Any]:
         raise JobFailure("job_not_found")
     allowed = {
         "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
-        "vad.json", "speaker_candidates.json", "speaker_matches.json",
+        "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
     }
     if {item.name for item in current.iterdir()} - allowed:
         raise JobFailure("job_workspace_invalid")
@@ -417,7 +417,7 @@ def resume_job(
         raise JobFailure("source_changed")
     allowed = {
         "job.json", "analysis.wav", "analysis_audio.json", "vad.json",
-        "speaker_candidates.json", "speaker_matches.json",
+        "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
     }
     for item in current.iterdir():
         if item.name not in allowed or item.is_symlink() or not item.is_file():

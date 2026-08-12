@@ -1984,3 +1984,38 @@ ownership、呼出順、入出力、失敗、再利用、再開、partial責務�
 ### Stage判定
 
 Stage 10の開始Gate、最小orchestrator、job交代、失敗・再開・再利用の限定検証およびDebug buildが完了したため、Stage 10をCompletedとする。
+
+---
+
+## 2026-08-12：Stage 16 raw quality feature契約
+
+### 問題
+
+明瞭度、他話者、BGM、SE、雑音を追加modelなしでどこまで客観的に保存するか、算出不能、短区間、計算コスト、ownership、Stage 17への入力契約が未確定だった。
+
+### 根拠
+
+既存の16kHz mono PCM s16le `analysis.wav`、candidate境界、VAD区間だけでPCM統計とspeech coverageは決定的に算出できる。一方、他話者、BGM、SEの意味分類は既存情報だけでは一意でなく、二値推測はfail-closed方針に反する。
+
+### 変更内容・決定
+
+- 明瞭度のraw観測値としてVAD speech coverage、RMS/peak dBFS、clipping ratio、zero-crossing rateを保存する。明瞭／不明瞭の判定はStage 17へ委譲する。
+- 雑音のraw観測値として非speech区間RMS dBFSとspeech-to-nonspeech dBを保存する。speechまたは非speech frameが不足する場合は理由付き`unavailable`とする。
+- 他話者、BGM、SEは新規modelを導入せず、Stage 16では`unavailable`とする。二値判定や0による欠損代替をしない。
+- 各featureは`status: available|unavailable`、`reason`、`values`を持つ。NaN／Infinityを禁止し、入力・schema・fingerprint不整合はstable error codeでfail-closedとする。
+- candidateごとにPCMを1回だけ逐次走査する。既存candidate上限の30秒、480,000 sampleを処理上限とし、全音声の重複解析やnetwork、追加依存を使用しない。候補処理時に実行し、計算量はsample数に対して線形とする。
+- 3秒未満は既存candidate契約外として入力不正。3秒以上は通常処理し、算出不能な個別featureだけを理由付き`unavailable`にする。
+- Python Quality Feature Serviceが計算、fingerprint検証、lock、partial、原子的正式化、再利用を所有し、`quality_features.json`を保存する。SwiftはProcess/IPCとstable error連携を所有する。
+- Stage 17はstrict schemaのraw featureだけを入力とし、採用・除外・表示の閾値を所有する。Stage 16はStage 15の人物一致・unknown・表示閾値を参照しない。
+
+### 影響正本
+
+`IMPLEMENTATION_STEPS.md`、`GATE_REGISTER.md`、`DECISIONS.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 16、17。Stage 15および既存VAD/candidate境界の意味は変更しない。
+
+### 再検証範囲
+
+人工sampleによるraw値、算出不能の明示、入力欠落、3秒境界、strict schema、fingerprint再利用、Python限定テスト、Swift IPC parser、Debug buildを対象とする。Stage 15Aと完了済みStageは再検証しない。

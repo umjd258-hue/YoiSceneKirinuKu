@@ -147,13 +147,15 @@ Tests: confusion matrix/誤受入/誤拒否等を記録。
 Done: Evidence付きで閾値をDECISIONSへ正本化。
 
 ## Stage 16: 品質評価基盤
-Gate: 利用可能な明瞭度/他話者/BGM/SE/雑音指標と計算コストを技術検証。
+Gate: 追加modelなしで観測可能な客観指標、観測不能カテゴリの明示状態、1 pass/candidate、欠損・短区間契約を技術検証。
 Input: candidate audio。
 Output: raw quality features。
 Scope: 特徴量生成。
 Forbidden: 最終品質閾値の推測。
 Tests: 人工/実サンプル、欠損、短区間。
 Done: raw featureを安定生成。
+
+Stage 16は16kHz mono PCM s16leのcandidate区間を1回走査し、VAD由来speech coverage、RMS/peak dBFS、clipping ratio、zero-crossing rate、非speech RMS、speech-to-nonspeech dBを保存する。1 candidateは既存契約どおり3〜30秒、最大480,000 sample、1 passに制限する。専用modelなしで意味を一意に識別できない他話者・BGM・SEは二値推測せず`unavailable`、speech／非speech frame不足で雑音指標を算出できない場合も理由付き`unavailable`とする。candidate生成契約の3秒未満は入力不正としてfail-closedとし、指標の採用・除外・表示閾値はStage 17だけが所有する。
 
 ## Stage 17: 品質判定契約
 Gate: ラベル付き品質データで閾値/表示変換を検証。
