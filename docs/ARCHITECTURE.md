@@ -33,6 +33,13 @@
 schema/内容/必要ファイルを検証後に正式化。
 正式成果物以外を完了扱いしない。
 
+## Stage 17 human-assisted quality decision
+- Stage 16の`quality_features.json`と人手補助入力`quality_human_assessments.json`を別成果物として保持し、自動値と人手由来値を混同しない。
+- 人手補助入力は`schema_version`、`job_id`、`speaker_candidates_fingerprint`、固定値`contract_version: stage17-human-quality-v1`、candidate ID順の`label`と`reason_codes`だけを持つstrict JSONとする。labelは`excellent`、`good`、`needs_review`の3値とし、candidate欠落はそのcandidateだけ`needs_review`とする。
+- 人手reason codeは`human_clear`、`human_usable_with_issue`、`reverb`、`bgm`、`se`、`overlap_speech`、`processed_voice`、`uncertain`に限定する。詳細理由未記録の◎は`human_clear`、○は`human_usable_with_issue`、△は`uncertain`を使用する。機械由来reason codeは`low_level`、`silence`、`clipping`、`short_or_boundary`、`noise`として別配列に保存する。
+- 人手補助入力のwriterは明示的なローカル確認UI／tool、reader・検証ownerはStage 17 Python Serviceとする。Serviceは入力を変更せず、`quality_decisions.json`のlock、partial、fingerprint検証、原子的正式化、再利用を所有する。
+- 現契約では未検証の自動閾値を推測せず、有効な人手labelを最終labelとする。人手入力欠落、不正、または`uncertain`は`needs_review`へfail-closedとする。将来の客観指標追加は人手labelを上方修正せず、安全側へのdowngradeだけを許可し、Stage 16・17を再検証する。
+
 ## Stage 10 pipeline orchestration
 - Swift orchestratorはStage 4〜9の呼出順、総合結果、キャンセルだけを所有し、成果物、Process、IPC、lock、検証を既存ServiceとPython ownerへ委譲する。
 - 呼出順はPreflight成功・source一致、人物再読込とmodel互換確認／必要時再生成、job作成または正式再開、`analysis.wav` pairの準備・再利用検証までとし、Stage 10ではVADを起動しない。
