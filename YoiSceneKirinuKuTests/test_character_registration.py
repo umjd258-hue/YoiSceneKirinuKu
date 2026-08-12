@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 import uuid
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +94,24 @@ class CharacterRegistrationTests(unittest.TestCase):
             "character_id": character_id,
             "characters_root": str(self.characters),
         }
+
+    def regeneration_request(self, character_id: str) -> dict:
+        return {
+            "protocol_version": 1,
+            "request_id": str(uuid.uuid4()),
+            "operation": "regenerate_embeddings",
+            "character_id": character_id,
+            "characters_root": str(self.characters),
+        }
+
+    def mark_model_incompatible(self, character_id: str) -> None:
+        character_root = self.characters / character_id
+        character = MODULE.read_json(character_root / "character.json")
+        for sample_id in character["sample_ids"]:
+            sample_path = character_root / "samples" / sample_id / "sample.json"
+            sample = MODULE.read_json(sample_path)
+            sample["embedding"]["model_revision"] = "old-model-revision"
+            MODULE.write_json(sample_path, sample)
 
     def register_initial_character(self) -> dict:
         return MODULE.register_character(
@@ -217,6 +236,125 @@ class CharacterRegistrationTests(unittest.TestCase):
                 )
         finally:
             os.close(descriptor)
+
+    def test_same_model_regeneration_is_noop(self) -> None:
+        initial = self.register_initial_character()
+        before = self.formal_snapshot(initial["character_id"])
+        calls = 0
+
+        def unexpected_embedding(model_directory: Path, wav_path: Path, output: Path) -> None:
+            nonlocal calls
+            calls += 1
+
+        result = MODULE.regenerate_character_embeddings(
+            self.regeneration_request(initial["character_id"]), self.model, SilentEmitter(),
+            embedding_generator=unexpected_embedding,
+        )
+
+        self.assertEqual(result, initial)
+        self.assertEqual(calls, 0)
+        self.assertEqual(self.formal_snapshot(initial["character_id"]), before)
+
+    def test_all_samples_regenerate_atomically_and_recalculate_centroid(self) -> None:
+        initial = self.register_initial_character()
+        updated = MODULE.add_sample(
+            self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+            embedding_generator=fake_embedding,
+        )
+        self.mark_model_incompatible(initial["character_id"])
+        formal = self.characters / initial["character_id"]
+        source_before = {
+            sample["sample_id"]: (formal / "samples" / sample["sample_id"] / "source.wav").read_bytes()
+            for sample in updated["samples"]
+        }
+        old_inode = formal.stat().st_ino
+        generated: list[np.ndarray] = []
+
+        def distinct_embedding(model_directory: Path, wav_path: Path, output: Path) -> None:
+            vector = np.zeros(MODULE.EMBEDDING_DIMENSION, dtype=np.float32)
+            vector[len(generated)] = 1.0
+            generated.append(vector)
+            with output.open("xb") as file:
+                np.save(file, vector, allow_pickle=False)
+
+        result = MODULE.regenerate_character_embeddings(
+            self.regeneration_request(initial["character_id"]), self.model, SilentEmitter(),
+            embedding_generator=distinct_embedding,
+        )
+
+        self.assertEqual([item["sample_id"] for item in result["samples"]], [item["sample_id"] for item in updated["samples"]])
+        self.assertNotEqual(formal.stat().st_ino, old_inode)
+        for sample in result["samples"]:
+            sample_id = sample["sample_id"]
+            self.assertEqual((formal / "samples" / sample_id / "source.wav").read_bytes(), source_before[sample_id])
+            metadata = MODULE.read_json(formal / "samples" / sample_id / "sample.json")
+            self.assertEqual(metadata["embedding"]["model_revision"], MODULE.MODEL_REVISION)
+        expected = np.mean(np.stack(generated), axis=0)
+        expected /= np.linalg.norm(expected)
+        np.testing.assert_allclose(MODULE.calculate_centroid(formal), expected, atol=1e-6)
+        self.assertFalse(any(path.name.startswith("centroid") for path in formal.rglob("*")))
+        self.assertEqual(list((self.characters / ".partial").glob("regenerate_*")), [])
+
+    def test_regeneration_failure_preserves_formal_character(self) -> None:
+        initial = self.register_initial_character()
+        MODULE.add_sample(
+            self.addition_request(initial["character_id"]), FFMPEG, self.model, SilentEmitter(),
+            embedding_generator=fake_embedding,
+        )
+        self.mark_model_incompatible(initial["character_id"])
+        before = self.formal_snapshot(initial["character_id"])
+        calls = 0
+
+        def fail_second(model_directory: Path, wav_path: Path, output: Path) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise MODULE.RegistrationFailure("registration_embedding_failed")
+            fake_embedding(model_directory, wav_path, output)
+
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_embedding_failed"):
+            MODULE.regenerate_character_embeddings(
+                self.regeneration_request(initial["character_id"]), self.model, SilentEmitter(),
+                embedding_generator=fail_second,
+            )
+        self.assertEqual(self.formal_snapshot(initial["character_id"]), before)
+
+    def test_regeneration_rejects_missing_or_invalid_source_without_mutation(self) -> None:
+        for invalid_kind in ("missing", "silent"):
+            with self.subTest(invalid_kind=invalid_kind):
+                initial = self.register_initial_character()
+                self.mark_model_incompatible(initial["character_id"])
+                formal = self.characters / initial["character_id"]
+                sample_id = initial["samples"][0]["sample_id"]
+                source = formal / "samples" / sample_id / "source.wav"
+                if invalid_kind == "missing":
+                    source.unlink()
+                    expected_code = "registration_wav_missing"
+                else:
+                    with wave.open(str(source), "wb") as wav:
+                        wav.setnchannels(1)
+                        wav.setsampwidth(2)
+                        wav.setframerate(16_000)
+                        wav.writeframes(bytes(16_000 * 3 * 2))
+                    expected_code = "registration_audio_silent"
+                before = self.formal_snapshot(initial["character_id"])
+                with self.assertRaisesRegex(MODULE.RegistrationFailure, expected_code):
+                    MODULE.regenerate_character_embeddings(
+                        self.regeneration_request(initial["character_id"]), self.model, SilentEmitter(),
+                        embedding_generator=fake_embedding,
+                    )
+                self.assertEqual(self.formal_snapshot(initial["character_id"]), before)
+
+    def test_model_mismatch_is_rejected_until_regenerated(self) -> None:
+        initial = self.register_initial_character()
+        self.mark_model_incompatible(initial["character_id"])
+        with self.assertRaisesRegex(MODULE.RegistrationFailure, "registration_model_incompatible"):
+            MODULE.list_characters(self._list_request())
+        MODULE.regenerate_character_embeddings(
+            self.regeneration_request(initial["character_id"]), self.model, SilentEmitter(),
+            embedding_generator=fake_embedding,
+        )
+        self.assertEqual(MODULE.list_characters(self._list_request())[0]["character_id"], initial["character_id"])
 
     def test_character_deletion_removes_only_selected_character(self) -> None:
         selected = self.register_initial_character()

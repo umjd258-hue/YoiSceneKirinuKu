@@ -38,6 +38,14 @@ schema/内容/必要ファイルを検証後に正式化。
 - 区間時刻は原則整数ms。
 - 候補ID等は決定的ID（例: UUIDv5）を使用可能。
 
+## 人物Embedding再生成
+- model metadata不一致の人物は、現modelで利用する前に再生成し、古いEmbeddingを使用しない。
+- 対象人物の全sampleを人物単位のcopy-on-writeで処理し、`source.wav`とsample IDを維持したままEmbeddingとmodel metadataを再生成する。
+- 全sampleの再生成・既存品質条件・schema・相互参照の検証成功後だけ人物ディレクトリを原子的に交換する。
+- centroidは交換後に全sample Embeddingから再計算し、永続化しない。
+- 1件でも失敗、`source.wav`欠落、品質不適合または検証失敗があれば旧人物データを変更せず、その人物を現modelでは使用不可とする。
+- schema version 1かつ同一model metadataの既存データは変更しない。
+
 ## 配置
 - Python/FFmpeg/AIモデルの開発時配置と製品配布時配置を分離して定義する。
 - Pythonの製品配置はStage 6で正本化済み。FFmpeg / ffprobeはupstream `8.1.2`の固定sourceからuniversal2・必要機能限定・LGPL互換configureで構築し、`Contents/MacOS/ffmpeg`と`Contents/MacOS/ffprobe`へ配置する。実行物を内側からad-hoc署名し、最後にappを署名する。

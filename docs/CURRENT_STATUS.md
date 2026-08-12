@@ -6,12 +6,12 @@
 
 ## 現在位置
 
-- Current Stage: Stage 7
-- Current Substage: Stage 7B
+- Current Stage: Stage 8
+- Current Substage: Stage 8C
 - State: Completed
-- Current Purpose: 解析用音声抽出
+- Current Purpose: 複数sample統合・model変更時再生成
 - Last Confirmed HEAD: `2c02aef96a3a3d6b9351f893e710dc96726f3bb9`
-- Next Action: Stage 7A/7B変更のcommit対象を既存未コミット差分から分離確認する。
+- Next Action: Stage 8C変更のcommit対象を既存未コミット差分から分離する。
 
 ## Stage別復元結果
 
@@ -26,10 +26,10 @@
 | Stage 7 FFmpeg解析用音声抽出 | Completed | Stage 7A/7B完了。検証済みFFmpeg 8.1.2 universal2をBundle固定位置へ組み込み、16kHz mono PCM s16le WAV生成・partial・検証・正式化・再利用・音声なし・FFmpeg失敗を限定検証済み |
 | Stage 7A FFmpeg配置Gate | Completed | source署名、固定toolchain、arm64 / x86_64 build、universal2、binary SHA固定、ad-hoc署名、Bundle固定位置相当からの起動、network無効・system frameworkのみ・PATH探索なしを限定検証済み |
 | Stage 7B 解析用音声抽出 | Completed | Bundle固定path導出、PythonのBundle配下・通常ファイル・実行権限検証、PATH非依存、既存音声抽出主要ケース、Swift限定テスト、Debug buildがPASS |
-| Stage 8 人物管理データ基盤・CRUD | Completed | `c922063`、`331c55d`、`1d965ce`、`CharacterRegistration.swift`、`character_registration.py` に作成・追加・読込・削除が存在 |
+| Stage 8 人物管理データ基盤・CRUD | Completed | CRUD責務、Stage 8A/8B、Stage 8Cの複数sample統合・model変更時再生成がすべて完了 |
 | Stage 8A Speaker Embedding技術Gate | Completed | 技術検証 `9ced234`、最終検証 `23e66d8`、`experiments/speaker-embedding/` が存在 |
 | Stage 8B sample/source.wav/Embedding永続化 | Completed | `c922063`、`331c55d`、`f64c957`。sample単位の `source.wav`、Embedding、metadataの原子的永続化が存在 |
-| Stage 8C 複数sample統合・再生成 | Partial | 複数sample追加と読取時centroid生成は `331c55d`、`1a1aeda` に存在するが、model変更時の正式representation再生成契約・実装が完了していない |
+| Stage 8C 複数sample統合・再生成 | Completed | 人物単位の全sample copy-on-write再生成、原子的交換、同一model無変更、失敗・source欠落・品質不適合時の旧データ不変、model不一致拒否、centroid再計算・非永続化を限定検証済み |
 | Stage 9 人物登録SwiftUI | Completed | `584262b`、`798540f`、`c922063`、`331c55d`、`1d965ce`。登録・sample追加・確認・削除UIとService連携が存在 |
 | Stage 10 解析ジョブ統合基盤 | Partial | job、解析WAV、VAD、候補生成、matchingの各Serviceは存在するが、VAD前までの統一pipeline orchestrationとして完了していない |
 | Stage 11 VAD | Completed | `de9b9e0`、`6ab4707`、`7a54fb5`、`VAD.swift`、`vad.py`、関連テストが存在 |
@@ -57,7 +57,7 @@
 - Stage 6開始Gate: PASS。Python 3.13.14のBundle同梱起動、strict JSON Lines、stdout/stderr分離、audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用を限定検証済み。`lsof -i`は連続監視ではない。
 - Stage 7A: PASS。FFmpeg 8.1.2 universal2 build、固定SHA、署名、固定位置相当からのoffline起動を限定検証済み。
 - Stage 7B開始Gate: PASS。既存のWAV・partial・正式化・再利用・失敗契約とStage 7Aの固定配置方式が一意に確定済み。
-- Stage 8C: 複数sample representation更新とmodel変更時再生成の正式契約が未完了。
+- Stage 8C: PASS。正式契約、本実装、Python限定18テスト、Stage 13 stale拒否テスト、Stage 9エラー連携Swift限定テスト兼Debug buildがPASS。
 - 既知問題: Xcodeテスト環境下で既存Python subprocess起動が長時間停止する場合がある。Stage 12〜14の記録では、該当Stage固有経路外として切り分け済みだが、全体テスト完走済みとは扱わない。
 
 ## 既存未コミット変更

@@ -1860,3 +1860,71 @@ vendor artifactのSHA・LFS実体・architecture・実行権限、Xcode Bundle�
 ### Gate判定
 
 保管・Build入力方式が一意に決定し、Stage 7Aと既存の解析WAV契約が成立しているため、Stage 7B開始GateをPASSとする。
+
+---
+
+## 2026-08-12：Stage 8C model変更時の人物Embedding再生成契約
+
+### 問題
+
+複数sampleのcentroid方式と再生成元 `source.wav` は決定済みだったが、model metadata不一致時の再生成単位、実行時期、原子的更新、失敗時動作および既存データ互換性が未確定だった。また、Stage 8CがPartialのまま親Stage 8がCompletedと記録され、決定済みの `source.wav` 品質条件が未決定registerに残っていた。
+
+### 根拠
+
+- `source.wav`、sample ID、model metadataをsample単位で保持し、centroidを全sample Embeddingから読取時に再計算する契約は確定済みである。
+- 既存の人物更新は人物全体のcopy-on-write、全件検証、原子的交換、失敗時の旧正式人物不変を採用している。
+- `SUBSTAGE_PLAN.md`は、Substage未完了時に親Stageを完了扱いしない。
+- `source.wav`の16kHz mono PCM s16le、3,000〜30,000ms、全sampleゼロ、RMS、peakの拒否条件はStage 8Aで確定済みである。
+
+### 変更内容・決定
+
+- model metadata不一致を検出した人物は、現modelで利用する前に対象人物の全sampleを人物単位で再生成する。
+- 各sampleの `source.wav` とsample IDを維持し、全sampleのEmbeddingとmodel metadataを現modelで再生成する。
+- 人物単位のcopy-on-writeとし、全件の再生成・検証成功後だけ原子的に交換する。
+- centroidは交換後に全sample Embeddingから再計算し、保存しない。
+- 1件でも再生成失敗、`source.wav`欠落、既存確定品質条件への不適合、その他の検証失敗があれば旧人物データを一切変更せず、その人物を現modelでは使用不可とする。
+- schema version 1かつ同一model metadataの既存データは変更しない。
+- Stage 8はCRUD責務完了を維持しつつ、Stage 8C完了までPartialとする。
+- 決定済みの `source.wav` 最低品質・長さ条件と複数sample representation更新規則を未決定registerから除外する。Stage 15/17の精度・閾値は変更しない。
+
+### 影響正本
+
+`DECISIONS.md`、`CHARACTER_POLICY.md`、`ARCHITECTURE.md`、`GATE_REGISTER.md`、`UNDECIDED_REGISTER.md`、`CURRENT_STATUS.md`、`REVALIDATION_MATRIX.md`。
+
+### 影響Stage
+
+Stage 8C。既存の永続化境界を再利用するためStage 8B、人物利用前のエラー連携に関するStage 9、人物読込とmodel互換性に関するStage 13を限定再検証する。model/preprocess、schema version、品質閾値、人物一致閾値は変更しない。
+
+### 再検証範囲
+
+- Stage 8B: 全sampleのcopy-on-write再生成、全件成功時の原子的交換、各失敗境界で旧人物・`source.wav`・sample IDが不変であること。
+- Stage 9: 現modelで使用不可の人物を成功扱いせず、安定errorとして扱うこと。登録・sample追加・削除UI全体は再検証しない。
+- Stage 13: 同一model人物の既存読込、model不一致人物の旧Embedding非使用、再生成後の全sample検証とcentroid再計算、人物変更後のstale成果物拒否。score精度・閾値は再検証しない。
+
+### Gate判定
+
+複数sample統合、model変更時再生成、品質不足、原子的更新、fail-closed、既存データ互換性が一意に決定したため、Stage 8C開始GateをPASSとする。Stage 8C本体は未完了であり、親Stage 8はPartialのままとする。
+
+---
+
+## 2026-08-12：Stage 8C model変更時再生成の実装・限定検証
+
+### 実装内容
+
+- Pythonに人物単位の全sample Embedding再生成を追加し、既存の人物別lock、copy-on-write、全件検証、原子的交換を再利用した。
+- `source.wav`とsample IDを維持し、同一model metadataは無変更、model不一致は再生成完了まで利用不可とした。
+- 失敗、`source.wav`欠落、確定済み品質条件への不適合、検証失敗では旧正式人物を変更しない。
+- 交換後に全sample Embeddingからcentroidを再計算して検証し、centroidを永続化しない。
+- Swift Serviceへ再生成要求と安定した `registration_model_incompatible` エラー連携を追加した。
+
+### 検証結果
+
+- Python限定18テストが成功し、同一model無変更、全sample再生成、原子的交換、途中失敗、source欠落、品質不適合、model不一致拒否、再生成後centroid、旧人物不変を確認した。
+- Stage 13の人物Embedding変更後stale拒否テストが成功した。
+- Stage 9のmodel不一致エラー連携Swift限定テストと、その実行に伴うDebug buildが成功した。
+- centroidファイルが生成されないことを確認した。
+- `git diff --check`を実施し、Stage 8C対象差分にwhitespace errorがないことを確認した。
+
+### Stage判定
+
+Stage 8CのGate、実装、限定再検証が完了したためStage 8CをCompletedとする。Stage 8A・8B・8Cおよび親Stage 8のCRUD責務が完了しているため、親Stage 8もCompletedとする。Stage 15/17の精度・閾値未決定事項は変更しない。

@@ -5,6 +5,7 @@
 - Python/IPC契約変更 → Stage 6以降の関連subprocess Stageを再検証
 - FFmpeg/version/音声抽出変更 → Stage 7A/7B、11以降の音声依存Stageを確認
 - Speaker Embedding model/preprocess変更 → Stage 8A、13、15以降を再検証。既存Embedding再生成判定
+- model変更時の人物Embedding再生成契約変更（model/preprocess自体は不変） → Stage 8Bの永続化・原子性、Stage 9の人物利用前エラー連携、Stage 13の人物読込・model不一致拒否を限定再検証
 - character/sample schema変更 → Stage 8、8A/8B/8C、9および読取側を再検証
 - VAD方式/parameter変更 → Stage 11、12、13以降の候補依存結果を再検証
 - candidate padding/merge/split変更 → Stage 12以降を再検証

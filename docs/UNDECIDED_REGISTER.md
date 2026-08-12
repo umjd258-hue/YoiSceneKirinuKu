@@ -4,9 +4,7 @@
 
 | 未決定事項 | 決定期限 |
 |---|---|
-| source.wav最低品質/長さ条件 | Stage 8A開始Gate |
 | Embedding model/version/preprocess | Stage 8A開始Gate |
-| 複数sample representation更新規則 | Stage 8C開始Gate |
 | 人物削除rollback/ownership | Stage 8開始Gate |
 | VAD方式/parameter | Stage 11開始Gate |
 | candidate merge/split/padding | Stage 12開始Gate |

@@ -15,6 +15,11 @@
 ## model更新
 embedding metadataのmodel_id/version/dimension/normalization/generation parametersを比較し、
 非互換なら古いEmbeddingを使用せず再生成対象とする。
+対象人物を現modelで利用する前に、人物単位のcopy-on-writeで全sampleのEmbeddingとmodel metadataを再生成する。
+各sampleの `source.wav` とsample IDは維持し、全件の再生成・検証成功後だけ人物ディレクトリを原子的に交換する。
+centroidは交換後に全sample Embeddingから再計算し、保存しない。
+1件でも再生成失敗、`source.wav` 欠落、確定済み品質条件への不適合、その他の検証失敗があれば旧人物データを変更せず、その人物を現modelでは使用不可とする。
+schema version 1かつ同一model metadataの既存データは変更しない。
 
 ## source.wav
 人物sampleごとに、Embedding再生成の元となる正式登録音声 `source.wav` を保持する。

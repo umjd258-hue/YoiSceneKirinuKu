@@ -21,6 +21,7 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
     case characterNotFound = "registration_character_not_found"
     case characterBusy = "registration_character_busy"
     case characterDeleteFailed = "registration_character_delete_failed"
+    case modelIncompatible = "registration_model_incompatible"
     case protocolError = "registration_protocol_error"
 
     var userMessage: String {
@@ -43,6 +44,8 @@ enum CharacterRegistrationErrorCode: String, Codable, CaseIterable, Sendable {
             "選択範囲の声が小さすぎます。"
         case .modelUnavailable, .embeddingFailed, .embeddingInvalid:
             "人物の声を登録できませんでした。"
+        case .modelIncompatible:
+            "人物の音声データを現在のモデルで利用できません。"
         case .metadataWriteFailed, .finalizationFailed, .characterDeleteFailed:
             "人物データを安全に保存できませんでした。"
         case .characterNotFound:
@@ -91,6 +94,7 @@ enum CharacterDeletionOutcome: Equatable, Sendable {
 protocol CharacterRegistrationServicing: Sendable {
     func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome
     func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome
+    func regenerateEmbeddings(for characterID: UUID, requestID: UUID) async -> CharacterRegistrationOutcome
     func deleteCharacter(_ characterID: UUID, requestID: UUID) async -> CharacterDeletionOutcome
     func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome
 }
@@ -170,6 +174,19 @@ final class CharacterRegistrationService: CharacterRegistrationServicing, @unche
             "source_path": request.sourceURL.path,
             "start_ms": request.startMilliseconds,
             "end_ms": request.endMilliseconds,
+            "characters_root": configuration.charactersRootURL.path,
+        ]
+        let result = await execute(body: body, requestID: requestID, configuration: configuration)
+        return CharacterRegistrationProtocolParser.parseRegistration(result, requestID: requestID)
+    }
+
+    func regenerateEmbeddings(for characterID: UUID, requestID: UUID) async -> CharacterRegistrationOutcome {
+        guard let configuration else { return .failure(.modelUnavailable) }
+        let body: [String: Any] = [
+            "protocol_version": 1,
+            "request_id": requestID.uuidString.lowercased(),
+            "operation": "regenerate_embeddings",
+            "character_id": "char_\(characterID.uuidString.lowercased())",
             "characters_root": configuration.charactersRootURL.path,
         ]
         let result = await execute(body: body, requestID: requestID, configuration: configuration)

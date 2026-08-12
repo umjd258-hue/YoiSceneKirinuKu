@@ -569,6 +569,14 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertEqual(subject.homeState.registeredCharacters, initialCharacters)
     }
 
+    func testModelIncompatibleErrorHasStableStage9Message() {
+        XCTAssertEqual(
+            CharacterRegistrationErrorCode.modelIncompatible.rawValue,
+            "registration_model_incompatible"
+        )
+        XCTAssertFalse(CharacterRegistrationErrorCode.modelIncompatible.userMessage.isEmpty)
+    }
+
     func testRegistrationRangeUsesGateLimits() {
         let subject = AppViewModel()
         XCTAssertTrue(subject.navigateToCharacters())
@@ -1052,6 +1060,10 @@ private struct ImmediateCharacterRegistrationService: CharacterRegistrationServi
     }
 
     func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        registration
+    }
+
+    func regenerateEmbeddings(for characterID: UUID, requestID: UUID) async -> CharacterRegistrationOutcome {
         registration
     }
 
