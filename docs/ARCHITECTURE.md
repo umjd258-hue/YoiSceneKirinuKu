@@ -33,6 +33,15 @@
 schema/内容/必要ファイルを検証後に正式化。
 正式成果物以外を完了扱いしない。
 
+## Stage 10 pipeline orchestration
+- Swift orchestratorはStage 4〜9の呼出順、総合結果、キャンセルだけを所有し、成果物、Process、IPC、lock、検証を既存ServiceとPython ownerへ委譲する。
+- 呼出順はPreflight成功・source一致、人物再読込とmodel互換確認／必要時再生成、job作成または正式再開、`analysis.wav` pairの準備・再利用検証までとし、Stage 10ではVADを起動しない。
+- producing Serviceだけが正式成果物の再利用可否と自身の固定partialのreconciliationを判定する。orchestratorはファイルを削除しない。
+- job作成後の確定失敗はPython job ownerがrevisionとstable error codeを持つ`failed`へ原子的に更新する。停止は`stopped`、不確定終了は復旧時に`recovery_required`とする。
+- `stopped`は`resumeJob`で`preparing`へ戻し、`recovery_required`はユーザー明示再開後に再検証する。`failed`は自動再開しない。
+- completed／failedからの新jobは、`.partial/replacement_<new_job_id>`で完成・fsync・再検証後、同一volumeの`RENAME_SWAP`で`current_job`と交換する。旧jobは`archive/job_<old_job_id>`へ移し、衝突時は上書きせずfail-closedとする。
+- crash後は有効な`current_job`だけを正本とし、replacement／archiveを自動昇格しない。Stage 10ではarchiveを自動削除しない。
+
 ## ID/時刻
 - 永続JSONは `schema_version` を持つ。
 - 区間時刻は原則整数ms。

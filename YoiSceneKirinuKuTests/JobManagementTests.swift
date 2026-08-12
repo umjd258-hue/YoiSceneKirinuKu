@@ -138,6 +138,67 @@ final class JobManagementTests: XCTestCase {
         )
     }
 
+    func testPipelineStopsAtVADReadyAndPreservesServiceOwnership() async {
+        let characterID = UUID()
+        let jobID = UUID()
+        let jobs = PipelineJobService(jobID: jobID)
+        let audioResult = AnalysisAudioResult(
+            reused: true, frameCount: 16_000, durationMilliseconds: 1_000, selectedStreamIndex: 0
+        )
+        let pipeline = AnalysisPipelineOrchestrator(
+            preflightService: PipelinePreflightService(),
+            characterService: PipelineCharacterService(characterID: characterID),
+            jobService: jobs,
+            audioService: PipelineAudioService(outcome: .success(audioResult))
+        )
+
+        let outcome = await pipeline.start(
+            sourceURL: URL(fileURLWithPath: "/tmp/source.mp4"),
+            characterIDs: [characterID],
+            requestID: UUID()
+        )
+
+        XCTAssertEqual(outcome, .ready(jobID: jobID, state: .preparing, audio: audioResult))
+        XCTAssertEqual(jobs.operations, ["create", "prepare"])
+    }
+
+    func testPipelineFailsJobWhenAudioPreparationFails() async {
+        let characterID = UUID()
+        let jobs = PipelineJobService(jobID: UUID())
+        let pipeline = AnalysisPipelineOrchestrator(
+            preflightService: PipelinePreflightService(),
+            characterService: PipelineCharacterService(characterID: characterID),
+            jobService: jobs,
+            audioService: PipelineAudioService(outcome: .failure(.ffmpegFailed))
+        )
+
+        let outcome = await pipeline.start(
+            sourceURL: URL(fileURLWithPath: "/tmp/source.mp4"),
+            characterIDs: [characterID],
+            requestID: UUID()
+        )
+
+        XCTAssertEqual(outcome, .failure(.audio(.ffmpegFailed)))
+        XCTAssertEqual(jobs.operations, ["create", "prepare", "fail:analysis_audio_ffmpeg_failed"])
+    }
+
+    func testPipelineResumeUsesExistingJobWithoutCreatingAnother() async {
+        let jobs = PipelineJobService(jobID: UUID())
+        let pipeline = AnalysisPipelineOrchestrator(
+            preflightService: PipelinePreflightService(),
+            characterService: PipelineCharacterService(characterID: UUID()),
+            jobService: jobs,
+            audioService: PipelineAudioService(outcome: .success(
+                AnalysisAudioResult(reused: false, frameCount: 32_000, durationMilliseconds: 2_000, selectedStreamIndex: 1)
+            ))
+        )
+
+        guard case .ready = await pipeline.resumeStopped(requestID: UUID()) else {
+            return XCTFail("stopped jobを再開できませんでした")
+        }
+        XCTAssertEqual(jobs.operations, ["resume"])
+    }
+
     private func configuration(workspace: URL) -> AnalysisJobConfiguration {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -148,4 +209,75 @@ final class JobManagementTests: XCTestCase {
             workspaceRootURL: workspace
         )
     }
+}
+
+private final class PipelinePreflightService: PreflightServicing, @unchecked Sendable {
+    func run(sourceURL: URL, requestID: UUID) async -> PreflightOutcome {
+        .success(PreflightResult(
+            fileName: sourceURL.lastPathComponent,
+            durationMilliseconds: 1_000,
+            containerFormat: "mov,mp4",
+            videoStreamCount: 1,
+            audioStreamCount: 1
+        ))
+    }
+}
+
+private final class PipelineCharacterService: CharacterRegistrationServicing, @unchecked Sendable {
+    let characterID: UUID
+    init(characterID: UUID) { self.characterID = characterID }
+    func register(_ request: CharacterRegistrationRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        .failure(.invalidRequest)
+    }
+    func addSample(_ request: CharacterSampleAdditionRequest, requestID: UUID) async -> CharacterRegistrationOutcome {
+        .failure(.invalidRequest)
+    }
+    func regenerateEmbeddings(for characterID: UUID, requestID: UUID) async -> CharacterRegistrationOutcome {
+        .success(RegisteredCharacter(characterID: characterID, displayName: "Test", samples: []))
+    }
+    func deleteCharacter(_ characterID: UUID, requestID: UUID) async -> CharacterDeletionOutcome {
+        .failure(.invalidRequest)
+    }
+    func loadCharacters(requestID: UUID) async -> CharacterLoadOutcome {
+        .success([RegisteredCharacter(characterID: characterID, displayName: "Test", samples: [])])
+    }
+}
+
+private final class PipelineJobService: AnalysisJobServicing, @unchecked Sendable {
+    let jobID: UUID
+    private let lock = NSLock()
+    private var storedOperations: [String] = []
+    var operations: [String] { lock.withLock { storedOperations } }
+    init(jobID: UUID) { self.jobID = jobID }
+    func createJob(sourceURL: URL, characterIDs: [UUID], requestID: UUID) async -> AnalysisJobOutcome {
+        record("create")
+        return .success(jobID: jobID, state: .startRequested)
+    }
+    func recoverJob(requestID: UUID) async -> AnalysisJobOutcome {
+        record("recover")
+        return .success(jobID: jobID, state: .recoveryRequired)
+    }
+    func resumeJob(requestID: UUID) async -> AnalysisJobOutcome {
+        record("resume")
+        return .success(jobID: jobID, state: .preparing)
+    }
+    func resumeRecoveryJob(requestID: UUID) async -> AnalysisJobOutcome {
+        record("resumeRecovery")
+        return .success(jobID: jobID, state: .preparing)
+    }
+    func prepareJob(jobID: UUID, requestID: UUID) async -> AnalysisJobOutcome {
+        record("prepare")
+        return .success(jobID: jobID, state: .preparing)
+    }
+    func failJob(jobID: UUID, failureCode: String, requestID: UUID) async -> AnalysisJobOutcome {
+        record("fail:\(failureCode)")
+        return .success(jobID: jobID, state: .failed)
+    }
+    private func record(_ operation: String) { lock.withLock { storedOperations.append(operation) } }
+}
+
+private final class PipelineAudioService: AnalysisAudioServicing, @unchecked Sendable {
+    let outcome: AnalysisAudioOutcome
+    init(outcome: AnalysisAudioOutcome) { self.outcome = outcome }
+    func prepare(jobID: UUID, requestID: UUID) async -> AnalysisAudioOutcome { outcome }
 }

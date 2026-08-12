@@ -16,7 +16,7 @@
 | Stage 8B | 登録資産を壊さず永続化可能 | source.wav/sample metadata/atomicity | 生成・再読込・失敗・rollback | 8A |
 | Stage 8C | 複数sample representationを再現可能に生成可能 | centroidは非永続、model不一致時は人物単位copy-on-write全sample再生成・全件成功後の原子的交換・fail-closed | 複数sample統合、同一model無変更、model不一致再生成、欠落・不十分sample・途中失敗時の旧データ不変 | 8A,8B |
 | Stage 9 | 人物登録UIが正式データ契約だけを操作可能 | 区間選択UX/error/CRUD導線 | 登録・追加・確認・削除・キャンセル | 8,8A-8C |
-| Stage 10 | 解析ジョブを既存基盤へ安全に統合可能 | 入出力/ownership/状態遷移 | 正常開始・失敗・再開境界 | 4-9 |
+| Stage 10 | 解析ジョブを既存基盤へ安全に統合可能 | 既存Service ownership、固定呼出順、失敗・停止・復旧・再利用、completed/failedからの原子的job交代 | 正常開始、再利用、失敗、停止、明示再開、crash境界、旧job保持 | 4-9 |
 | Stage 11 | VAD方式がローカル利用可能 | implementation/model/parameter | speech/silence/noise/短音/cost | 10 |
 | Stage 12 | candidate契約が一意 | padding/merge/split/ID | 境界/再利用/partial | 11 |
 | Stage 13 | speaker scoreが再現可能 | model/preprocess/score | same/different synthetic/basic cost | 8A-8C,12 |

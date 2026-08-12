@@ -1,17 +1,17 @@
 # CURRENT_STATUS.md
 
-更新日: 2026-08-11
+更新日: 2026-08-12
 
 この文書は、Stage体系整合化commit `2c02aef96a3a3d6b9351f893e710dc96726f3bb9` 後の現行Stage定義に対し、Git履歴と実在成果物を照合して復元した進捗正本である。旧Stage番号は機械変換せず、`IMPLEMENTATION_STEPS.md` と `SUBSTAGE_PLAN.md` の現在の完了条件で再判定した。
 
 ## 現在位置
 
-- Current Stage: Stage 8
-- Current Substage: Stage 8C
+- Current Stage: Stage 10
+- Current Substage: なし
 - State: Completed
-- Current Purpose: 複数sample統合・model変更時再生成
+- Current Purpose: 解析ジョブ統合基盤
 - Last Confirmed HEAD: `2c02aef96a3a3d6b9351f893e710dc96726f3bb9`
-- Next Action: Stage 8C変更のcommit対象を既存未コミット差分から分離する。
+- Next Action: Stage 10変更のcommit対象を既存未コミット差分から分離する。
 
 ## Stage別復元結果
 
@@ -31,7 +31,7 @@
 | Stage 8B sample/source.wav/Embedding永続化 | Completed | `c922063`、`331c55d`、`f64c957`。sample単位の `source.wav`、Embedding、metadataの原子的永続化が存在 |
 | Stage 8C 複数sample統合・再生成 | Completed | 人物単位の全sample copy-on-write再生成、原子的交換、同一model無変更、失敗・source欠落・品質不適合時の旧データ不変、model不一致拒否、centroid再計算・非永続化を限定検証済み |
 | Stage 9 人物登録SwiftUI | Completed | `584262b`、`798540f`、`c922063`、`331c55d`、`1d965ce`。登録・sample追加・確認・削除UIとService連携が存在 |
-| Stage 10 解析ジョブ統合基盤 | Partial | job、解析WAV、VAD、候補生成、matchingの各Serviceは存在するが、VAD前までの統一pipeline orchestrationとして完了していない |
+| Stage 10 解析ジョブ統合基盤 | Completed | Preflight、人物model互換確認・再生成、job作成・正式再開、解析WAV準備・再利用を既存ownerへ委譲するorchestratorを実装。VAD-readyで停止し、terminal jobの原子的交代、fail-closed、再開・失敗を限定検証済み |
 | Stage 11 VAD | Completed | `de9b9e0`、`6ab4707`、`7a54fb5`、`VAD.swift`、`vad.py`、関連テストが存在 |
 | Stage 12 候補区間生成 | Completed | `e1b5c1c`、`146c58c`、`CandidateGeneration.swift`、`candidate_generation.py`、安定ID・復旧テストが存在 |
 | Stage 13 Speaker Matching基盤 | Completed | `eb213aa`、`1a1aeda`、`30903e8`、`SpeakerMatching.swift`、`speaker_matching.py`、raw score生成テストが存在 |

@@ -91,6 +91,54 @@ class JobManagementTests(unittest.TestCase):
             self.workspace / "current_job" / "job.json", "job_invalid"
         )["job_id"], first["job_id"])
 
+    def test_terminal_job_is_atomically_replaced_and_archived(self) -> None:
+        first, _ = self.create()
+        first["state"] = "completed"
+        first["state_revision"] = 1
+        MODULE.replace_job(self.workspace, first, str(uuid.uuid4()))
+        second = self.job()
+        MODULE.run(self.request("create_job", second), CapturingEmitter())
+        current = MODULE.read_json(self.workspace / "current_job" / "job.json", "job_invalid")
+        archived = MODULE.read_json(
+            self.workspace / "archive" / f"job_{first['job_id']}" / "job.json", "job_invalid"
+        )
+        self.assertEqual(current["job_id"], second["job_id"])
+        self.assertEqual(archived["job_id"], first["job_id"])
+
+    def test_replacement_rolls_back_after_swap_validation_failure(self) -> None:
+        first, _ = self.create()
+        first["state"] = "failed"
+        first["state_revision"] = 1
+        first["failure_code"] = "test_failure"
+        MODULE.replace_job(self.workspace, first, str(uuid.uuid4()))
+        with self.assertRaisesRegex(MODULE.JobFailure, "job_write_failed"):
+            MODULE.replace_current_job(self.workspace, self.job(), fail_after_swap=True)
+        current = MODULE.read_json(self.workspace / "current_job" / "job.json", "job_invalid")
+        self.assertEqual(current["job_id"], first["job_id"])
+
+    def test_archive_collision_fails_without_changing_current(self) -> None:
+        first, _ = self.create()
+        first["state"] = "completed"
+        first["state_revision"] = 1
+        MODULE.replace_job(self.workspace, first, str(uuid.uuid4()))
+        collision = self.workspace / "archive" / f"job_{first['job_id']}"
+        collision.mkdir(parents=True)
+        with self.assertRaisesRegex(MODULE.JobFailure, "job_workspace_invalid"):
+            MODULE.run(self.request("create_job", self.job()), CapturingEmitter())
+        current = MODULE.read_json(self.workspace / "current_job" / "job.json", "job_invalid")
+        self.assertEqual(current["job_id"], first["job_id"])
+
+    def test_archive_move_failure_keeps_new_current_authoritative(self) -> None:
+        first, _ = self.create()
+        first["state"] = "completed"
+        first["state_revision"] = 1
+        MODULE.replace_job(self.workspace, first, str(uuid.uuid4()))
+        second = self.job()
+        with self.assertRaisesRegex(MODULE.JobFailure, "job_write_failed"):
+            MODULE.replace_current_job(self.workspace, second, fail_archive_move=True)
+        current = MODULE.read_json(self.workspace / "current_job" / "job.json", "job_invalid")
+        self.assertEqual(current["job_id"], second["job_id"])
+
     def test_lock_contention_rejects_before_job_creation(self) -> None:
         job = self.job()
         workspace = MODULE.prepare_workspace(str(self.workspace))
@@ -117,6 +165,11 @@ class JobManagementTests(unittest.TestCase):
         recovered = MODULE.read_json(self.workspace / "current_job" / "job.json", "job_invalid")
         self.assertEqual(recovered["state_revision"], 1)
         self.assertFalse(marker.exists())
+
+        resumed = MODULE.run(
+            self.request("resume_recovery_job", recovered, str(uuid.uuid4())), CapturingEmitter()
+        )
+        self.assertEqual(resumed["state"], "preparing")
 
     def test_source_change_prevents_reuse(self) -> None:
         job, _ = self.create()

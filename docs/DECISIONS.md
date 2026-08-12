@@ -1928,3 +1928,59 @@ Stage 8C。既存の永続化境界を再利用するためStage 8B、人物利�
 ### Stage判定
 
 Stage 8CのGate、実装、限定再検証が完了したためStage 8CをCompletedとする。Stage 8A・8B・8Cおよび親Stage 8のCRUD責務が完了しているため、親Stage 8もCompletedとする。Stage 15/17の精度・閾値未決定事項は変更しない。
+
+---
+
+## 2026-08-12：Stage 10解析ジョブ統合・新job原子的交代契約
+
+### 問題
+
+Stage 4〜9の個別Serviceと成果物契約は存在するが、VAD前までのownership、呼出順、失敗・再利用・再開、およびcompleted／failed jobから新jobへ交代する契約が未確定だった。
+
+### 変更内容・決定
+
+- orchestratorは呼出順、総合結果、キャンセルだけを所有し、成果物、Process、IPC、lock、検証を既存Service／Python ownerへ委譲する。
+- Preflight成功・source一致、人物再読込・model互換確認／必要時Stage 8C再生成、job作成または正式再開、解析WAV準備・再利用検証の順で進め、VAD-readyで停止する。Stage 10ではVADを起動しない。
+- 新しい永続schemaを追加せず、source URL、重複のない人物ID、既存job型、`analysis.wav`／`analysis_audio.json`を合成する。
+- job作成前の失敗はjobを作らない。作成後の確定失敗はPython ownerがrevisionを進めstable error code付き`failed`へ原子的更新する。stopは`stopped`、不確定終了は`recovery_required`とし、正式成果物を削除しない。
+- producing Serviceだけが再利用を判定し、完全一致時は再生成しない。不一致・欠落・unknown schemaは既存lock下reconciliationへ委譲する。
+- stoppedは`resumeJob`でpreparingへ戻し、recovery_requiredはユーザー明示再開後に再検証する。failedは自動再開しない。
+- orchestratorはファイルを削除せず、各Python ownerが自身の固定partialだけをlock下で清掃する。未知項目は削除せずfail-closedとする。
+- completed／failedからの新jobは`workspace/.partial/replacement_<new_job_id>`で完成、fsync、再検証し、同一volume上の`renameatx_np(..., RENAME_SWAP)`で`current_job`と原子的交換する。
+- 交換後の旧jobは`workspace/archive/job_<old_job_id>`へ移す。archive衝突時は上書き・自動削除せずfail-closedとし、Stage 10ではarchiveを自動削除しない。
+- swap前失敗は旧jobを変更しない。swap直後の再検証失敗は同一process内だけ再swapし、rollback失敗時はfail-closedとする。archive移動失敗時も新`current_job`を正本として維持する。
+- crash後は有効な`current_job`だけを正本とし、replacement／archiveを自動昇格しない。currentが不正・欠落ならfail-closedとする。
+- source変更時は旧成果物を再利用せず、fresh Preflight成功後に新fingerprintで新jobを作成する。
+
+### 影響正本
+
+`ARCHITECTURE.md`、`GATE_REGISTER.md`、`CURRENT_STATUS.md`、`DECISIONS.md`。
+
+### 影響Stage・再検証範囲
+
+Stage 10のみ。job作成前失敗、正常開始、解析WAV生成・再利用、作成後失敗、stopped再開、recovery_required明示再開、completed／failed交代、swap前後失敗、archive衝突、source変更、unknown項目を限定検証する。Stage 4〜9の個別完了検証およびStage 11以降は再検証しない。
+
+### Gate判定
+
+ownership、呼出順、入出力、失敗、再利用、再開、partial責務、原子的job交代とcrash時正本が一意に決定したため、Stage 10開始GateをPASSとする。
+
+---
+
+## 2026-08-12：Stage 10解析ジョブ統合基盤の実装・限定検証
+
+### 実装内容
+
+- Swift orchestratorを追加し、Preflight、人物model互換確認・必要時再生成、job作成／明示再開、解析WAV準備・再利用検証を既存Serviceへ委譲してVAD-readyで停止する構成とした。
+- Python job ownerへ`preparing`、stable error付き`failed`、`stopped`／`recovery_required`からの明示再開を追加した。
+- completed／failed jobの新規交代は、検証済みreplacementと`current_job`を`RENAME_SWAP`で交換し、旧jobをID付きarchiveへ移動する。交換前失敗、交換直後失敗、archive衝突・移動失敗を決定済みfail-closed契約に従わせた。
+- 新しい永続schemaを追加せず、Stage 11のVADは起動しない。
+
+### 検証結果
+
+- Python限定11テストが成功し、通常作成、active job拒否、completed／failed交代、archive保持・衝突、swap後rollback、archive移動失敗時の新current維持、source変更拒否、recovery再開を確認した。
+- Swift orchestrator限定3テストとDebug buildが成功し、VAD-ready停止、既存成果物再利用結果の伝播、解析WAV失敗時のstable error連携、stopped job再開を確認した。
+- `git diff --check`でStage 10差分にwhitespace errorがないことを確認した。
+
+### Stage判定
+
+Stage 10の開始Gate、最小orchestrator、job交代、失敗・再開・再利用の限定検証およびDebug buildが完了したため、Stage 10をCompletedとする。

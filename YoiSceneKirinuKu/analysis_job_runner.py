@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import fcntl
+import ctypes
 import hashlib
 import json
 import os
@@ -175,6 +176,100 @@ def read_json(path: Path, code: str) -> dict[str, Any]:
     return value
 
 
+JOB_DIRECTORY_ITEMS = {
+    "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
+    "vad.json", "speaker_candidates.json", "speaker_matches.json",
+}
+
+
+def validate_job_directory(directory: Path) -> dict[str, Any]:
+    if not directory.is_dir() or directory.is_symlink():
+        raise JobFailure("job_workspace_invalid")
+    items = {item.name for item in directory.iterdir()}
+    if "job.json" not in items or not items.issubset(JOB_DIRECTORY_ITEMS):
+        raise JobFailure("job_workspace_invalid")
+    for item in directory.iterdir():
+        metadata = item.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or item.is_symlink():
+            raise JobFailure("job_workspace_invalid")
+    return validate_job(read_json(directory / "job.json", "job_invalid"))
+
+
+def fsync_directory(directory: Path) -> None:
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def exchange_directories(first: Path, second: Path) -> None:
+    rename = ctypes.CDLL(None, use_errno=True).renameatx_np
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(-2, os.fsencode(first), -2, os.fsencode(second), 0x00000002) != 0:
+        raise JobFailure("job_write_failed")
+
+
+def replace_current_job(
+    workspace: Path,
+    new_job: dict[str, Any],
+    fail_after_swap: bool = False,
+    fail_archive_move: bool = False,
+) -> None:
+    current = workspace / "current_job"
+    old_job = validate_job_directory(current)
+    if old_job["state"] not in {"completed", "failed"}:
+        raise JobFailure("job_already_exists")
+    if source_fingerprint(Path(new_job["source"]["path"])) != new_job["source"]["fingerprint"]:
+        raise JobFailure("source_changed")
+
+    replacement = workspace / ".partial" / f"replacement_{new_job['job_id']}"
+    archive_root = workspace / "archive"
+    archive = archive_root / f"job_{old_job['job_id']}"
+    if replacement.exists() or replacement.is_symlink() or archive.exists() or archive.is_symlink():
+        raise JobFailure("job_workspace_invalid")
+    try:
+        archive_root.mkdir(exist_ok=True)
+        if not archive_root.is_dir() or archive_root.is_symlink():
+            raise JobFailure("job_workspace_invalid")
+        replacement.mkdir()
+        job_path = replacement / "job.json"
+        data = json.dumps(validate_job(new_job), ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n"
+        with job_path.open("x", encoding="utf-8") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        if validate_job_directory(replacement) != new_job:
+            raise JobFailure("job_invalid")
+        fsync_directory(replacement)
+        fsync_directory(workspace / ".partial")
+    except JobFailure:
+        raise
+    except OSError as error:
+        raise JobFailure("job_write_failed") from error
+
+    exchange_directories(current, replacement)
+    try:
+        if fail_after_swap or validate_job_directory(current) != new_job:
+            raise JobFailure("job_write_failed")
+    except JobFailure:
+        try:
+            exchange_directories(current, replacement)
+        except JobFailure:
+            pass
+        raise
+
+    try:
+        if fail_archive_move:
+            raise OSError("injected archive failure")
+        os.rename(replacement, archive)
+        fsync_directory(archive_root)
+        fsync_directory(workspace)
+    except OSError as error:
+        raise JobFailure("job_write_failed") from error
+
+
 def write_job(workspace: Path, job: dict[str, Any], request_id: str) -> None:
     current = workspace / "current_job"
     if current.exists():
@@ -183,7 +278,10 @@ def write_job(workspace: Path, job: dict[str, Any], request_id: str) -> None:
         allowed = {"stop.requested"}
         actual = {item.name for item in current.iterdir()}
         if "job.json" in actual:
-            validate_job(read_json(current / "job.json", "job_invalid"))
+            existing = validate_job_directory(current)
+            if existing["state"] in {"completed", "failed"}:
+                replace_current_job(workspace, job)
+                return
             raise JobFailure("job_already_exists")
         if not actual.issubset(allowed):
             raise JobFailure("job_workspace_invalid")
@@ -303,12 +401,14 @@ def recover_job(workspace: Path) -> dict[str, Any]:
     return validate_job(read_json(path, "job_invalid"))
 
 
-def resume_job(workspace: Path, requested_job_id: str, request_id: str) -> dict[str, Any]:
+def resume_job(
+    workspace: Path, requested_job_id: str, request_id: str, expected_state: str = "stopped"
+) -> dict[str, Any]:
     current = workspace / "current_job"
     if not current.is_dir() or current.is_symlink():
         raise JobFailure("job_not_found")
     job = validate_job(read_json(current / "job.json", "job_invalid"))
-    if job["job_id"] != requested_job_id or job["state"] != "stopped":
+    if job["job_id"] != requested_job_id or job["state"] != expected_state:
         raise JobFailure("job_invalid")
     marker = current / "stop.requested"
     if marker.exists() or marker.is_symlink():
@@ -326,6 +426,29 @@ def resume_job(workspace: Path, requested_job_id: str, request_id: str) -> dict[
     job["state"] = "preparing"
     job["failure_code"] = None
     return replace_job(workspace, job, request_id)
+
+
+def fail_job(workspace: Path, requested: dict[str, Any], request_id: str) -> dict[str, Any]:
+    current = validate_job_directory(workspace / "current_job")
+    if current["job_id"] != requested["job_id"] or current["state"] in {"completed", "failed", "stopped"}:
+        raise JobFailure("job_invalid")
+    expected = {
+        **current,
+        "state_revision": current["state_revision"] + 1,
+        "state": "failed",
+        "failure_code": requested["failure_code"],
+    }
+    if requested != expected:
+        raise JobFailure("job_invalid")
+    return replace_job(workspace, expected, request_id)
+
+
+def prepare_job(workspace: Path, requested: dict[str, Any], request_id: str) -> dict[str, Any]:
+    current = validate_job_directory(workspace / "current_job")
+    expected = {**current, "state_revision": current["state_revision"] + 1, "state": "preparing"}
+    if current["state"] != "start_requested" or requested != expected:
+        raise JobFailure("job_invalid")
+    return replace_job(workspace, expected, request_id)
 
 
 def run(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
@@ -357,6 +480,14 @@ def run(request: dict[str, Any], emitter: Emitter) -> dict[str, Any]:
                 raise JobFailure("job_invalid")
         elif operation == "resume_job":
             result = resume_job(workspace, job["job_id"], request["request_id"])
+        elif operation == "resume_recovery_job":
+            result = resume_job(
+                workspace, job["job_id"], request["request_id"], "recovery_required"
+            )
+        elif operation == "fail_job":
+            result = fail_job(workspace, job, request["request_id"])
+        elif operation == "prepare_job":
+            result = prepare_job(workspace, job, request["request_id"])
         else:
             raise JobFailure("job_invalid")
         emitter.emit("progress", {"stage": "job_ready", "status": "completed"})

@@ -111,6 +111,9 @@ protocol AnalysisJobServicing: Sendable {
     func createJob(sourceURL: URL, characterIDs: [UUID], requestID: UUID) async -> AnalysisJobOutcome
     func recoverJob(requestID: UUID) async -> AnalysisJobOutcome
     func resumeJob(requestID: UUID) async -> AnalysisJobOutcome
+    func resumeRecoveryJob(requestID: UUID) async -> AnalysisJobOutcome
+    func prepareJob(jobID: UUID, requestID: UUID) async -> AnalysisJobOutcome
+    func failJob(jobID: UUID, failureCode: String, requestID: UUID) async -> AnalysisJobOutcome
 }
 
 final class AnalysisJobService: AnalysisJobServicing, @unchecked Sendable {
@@ -165,6 +168,55 @@ final class AnalysisJobService: AnalysisJobServicing, @unchecked Sendable {
               let job = try? Self.loadJob(from: configuration.workspaceRootURL),
               job.state == .stopped else { return .failure(.jobInvalid) }
         return await execute(operation: "resume_job", job: job, requestID: requestID, configuration: configuration)
+    }
+
+    func resumeRecoveryJob(requestID: UUID) async -> AnalysisJobOutcome {
+        guard let configuration,
+              let job = try? Self.loadJob(from: configuration.workspaceRootURL),
+              job.state == .recoveryRequired else { return .failure(.jobInvalid) }
+        return await execute(
+            operation: "resume_recovery_job", job: job, requestID: requestID, configuration: configuration
+        )
+    }
+
+    func failJob(jobID: UUID, failureCode: String, requestID: UUID) async -> AnalysisJobOutcome {
+        guard let configuration,
+              !failureCode.isEmpty, failureCode.count <= 100,
+              let job = try? Self.loadJob(from: configuration.workspaceRootURL),
+              job.jobID == jobID,
+              ![.completed, .failed, .stopped].contains(job.state) else {
+            return .failure(.jobInvalid)
+        }
+        let failed = AnalysisJobDocument(
+            schemaVersion: job.schemaVersion,
+            jobID: job.jobID,
+            startRequestID: job.startRequestID,
+            stateRevision: job.stateRevision + 1,
+            state: .failed,
+            source: job.source,
+            selectedCharacterIDs: job.selectedCharacterIDs,
+            failureCode: failureCode
+        )
+        return await execute(operation: "fail_job", job: failed, requestID: requestID, configuration: configuration)
+    }
+
+    func prepareJob(jobID: UUID, requestID: UUID) async -> AnalysisJobOutcome {
+        guard let configuration,
+              let job = try? Self.loadJob(from: configuration.workspaceRootURL),
+              job.jobID == jobID, job.state == .startRequested else {
+            return .failure(.jobInvalid)
+        }
+        let preparing = AnalysisJobDocument(
+            schemaVersion: job.schemaVersion,
+            jobID: job.jobID,
+            startRequestID: job.startRequestID,
+            stateRevision: job.stateRevision + 1,
+            state: .preparing,
+            source: job.source,
+            selectedCharacterIDs: job.selectedCharacterIDs,
+            failureCode: nil
+        )
+        return await execute(operation: "prepare_job", job: preparing, requestID: requestID, configuration: configuration)
     }
 
     private static func jobURL(in workspace: URL) -> URL {
@@ -391,4 +443,119 @@ private final class JobStreamData: @unchecked Sendable {
     var stdout: Data { lock.withLock { storedStdout } }
     func setStdout(_ data: Data) { lock.withLock { storedStdout = data } }
     func setStderr(_ data: Data) { lock.withLock { storedStderr = data } }
+}
+
+enum AnalysisPipelineError: Equatable, Sendable {
+    case invalidInput
+    case cancelled
+    case preflight(PreflightErrorCode)
+    case character(CharacterRegistrationErrorCode)
+    case job(AnalysisJobErrorCode)
+    case audio(AnalysisAudioErrorCode)
+}
+
+enum AnalysisPipelineOutcome: Equatable, Sendable {
+    case ready(jobID: UUID, state: AnalysisJobState, audio: AnalysisAudioResult)
+    case stopped(jobID: UUID)
+    case failure(AnalysisPipelineError)
+}
+
+struct AnalysisPipelineOrchestrator: Sendable {
+    let preflightService: any PreflightServicing
+    let characterService: any CharacterRegistrationServicing
+    let jobService: any AnalysisJobServicing
+    let audioService: any AnalysisAudioServicing
+
+    func start(sourceURL: URL, characterIDs: [UUID], requestID: UUID) async -> AnalysisPipelineOutcome {
+        guard !characterIDs.isEmpty, Set(characterIDs).count == characterIDs.count else {
+            return .failure(.invalidInput)
+        }
+        guard !Task.isCancelled else { return .failure(.cancelled) }
+        switch await preflightService.run(sourceURL: sourceURL, requestID: requestID) {
+        case .success:
+            break
+        case .failure(let code):
+            return .failure(.preflight(code))
+        }
+        guard !Task.isCancelled else { return .failure(.cancelled) }
+
+        for characterID in characterIDs {
+            switch await characterService.regenerateEmbeddings(for: characterID, requestID: UUID()) {
+            case .success:
+                break
+            case .failure(let code):
+                return .failure(.character(code))
+            }
+        }
+        let characters: [RegisteredCharacter]
+        switch await characterService.loadCharacters(requestID: UUID()) {
+        case .success(let loaded):
+            characters = loaded
+        case .failure(let code):
+            return .failure(.character(code))
+        }
+        guard Set(characterIDs).isSubset(of: Set(characters.map(\.characterID))) else {
+            return .failure(.character(.characterNotFound))
+        }
+        guard !Task.isCancelled else { return .failure(.cancelled) }
+
+        switch await jobService.createJob(sourceURL: sourceURL, characterIDs: characterIDs, requestID: requestID) {
+        case .failure(let code):
+            return .failure(.job(code))
+        case .success(let jobID, .startRequested):
+            return await prepare(jobID: jobID, requestID: UUID())
+        case .success:
+            return .failure(.job(.jobInvalid))
+        }
+    }
+
+    func resumeStopped(requestID: UUID) async -> AnalysisPipelineOutcome {
+        switch await jobService.resumeJob(requestID: requestID) {
+        case .success(let jobID, .preparing):
+            return await prepareAudio(jobID: jobID, requestID: UUID())
+        case .failure(let code):
+            return .failure(.job(code))
+        case .success:
+            return .failure(.job(.jobInvalid))
+        }
+    }
+
+    func resumeRecovery(requestID: UUID) async -> AnalysisPipelineOutcome {
+        switch await jobService.resumeRecoveryJob(requestID: requestID) {
+        case .success(let jobID, .preparing):
+            return await prepareAudio(jobID: jobID, requestID: UUID())
+        case .failure(let code):
+            return .failure(.job(code))
+        case .success:
+            return .failure(.job(.jobInvalid))
+        }
+    }
+
+    private func prepare(jobID: UUID, requestID: UUID) async -> AnalysisPipelineOutcome {
+        switch await jobService.prepareJob(jobID: jobID, requestID: requestID) {
+        case .success(_, .preparing):
+            return await prepareAudio(jobID: jobID, requestID: UUID())
+        case .failure(let code):
+            return .failure(.job(code))
+        case .success:
+            return .failure(.job(.jobInvalid))
+        }
+    }
+
+    private func prepareAudio(jobID: UUID, requestID: UUID) async -> AnalysisPipelineOutcome {
+        guard !Task.isCancelled else { return .failure(.cancelled) }
+        switch await audioService.prepare(jobID: jobID, requestID: requestID) {
+        case .success(let result):
+            return .ready(jobID: jobID, state: .preparing, audio: result)
+        case .stopped(let stoppedJobID):
+            return .stopped(jobID: stoppedJobID)
+        case .failure(let code):
+            _ = await jobService.failJob(
+                jobID: jobID,
+                failureCode: code.rawValue,
+                requestID: UUID()
+            )
+            return .failure(.audio(code))
+        }
+    }
 }
