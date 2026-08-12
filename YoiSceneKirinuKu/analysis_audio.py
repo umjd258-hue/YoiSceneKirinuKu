@@ -261,7 +261,7 @@ def generate(
         allowed = {
             "job.json", "stop.requested", "analysis.wav", "analysis_audio.json",
             "vad.json", "speaker_candidates.json", "speaker_matches.json", "quality_features.json",
-            "quality_human_assessments.json", "quality_decisions.json",
+            "speaker_decisions.json", "quality_human_assessments.json", "quality_decisions.json",
         }
         if {item.name for item in current.iterdir()} - allowed:
             raise AudioFailure("analysis_audio_job_invalid")
