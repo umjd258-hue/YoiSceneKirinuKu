@@ -1,0 +1,6 @@
+464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c  source/ffmpeg-8.1.2.tar.xz
+0a0963fccd70597838073f3e31b20f4a4d8cc2b5e577472c9a5a1f22624246f8  source/ffmpeg-8.1.2.tar.xz.asc
+397b3becedcd5a98769967ff1ff8501ddc89f8368b8f766e4701377d7dbaabe5  source/ffmpeg-devel.asc
+b54274779b2d3de25aefc1c7b1df3a7ab65fca3dbdd2ad57cb9ccab109915d67  universal2/bin/ffmpeg
+a5b19683c2caacd408e57ac3322e56c1dde571bf0c1a565631f9a63bb5d33de2  universal2/bin/ffprobe
+2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af  LICENSE.md

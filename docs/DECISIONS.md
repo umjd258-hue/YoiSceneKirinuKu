@@ -1732,3 +1732,131 @@ Stage 6のみ。製品runtime、後続Stageの依存、製品挙動は変更し�
 - trusted rootはSigstore公式`root-signing` commit `c9bda74ad2221f938f7d2e0295ca3aad2da710a8`の公式raw版、SHA-256 `6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66`を使用した。
 - Python installer、bundle v0.3、identity=`thomas@python.org`、issuer=`https://accounts.google.com`、固定trusted rootをすべて指定し、networkなしのoffline検証で`Verified OK`を確認した。
 - 初回起動時のSIGKILLは`com.apple.quarantine`属性が原因だった。内容SHA-256とcodesign整合性を確認した実行物から同属性だけを削除した後、`version`とoffline検証がPASSした。
+
+---
+
+## 2026-08-12：Stage 7A FFmpeg / ffprobe製品配置・実行方式
+
+### 問題
+
+Stage 7A開始Gateに必要なFFmpeg / ffprobeのexact build・version、製品Bundle内配置、固定実行方式が未決定だった。
+
+### 根拠
+
+- 既存検証はローカルFFmpeg 8.1.2とshellなしのPython subprocessで成立しているが、Homebrew pathは製品の再現可能なoffline依存にできない。
+- Stage 6でBundle固定相対位置、PATH探索禁止、内側から外側への署名順序を採用済みである。
+- 既存の解析音声生成はSwiftからPythonへ実行pathを渡し、Pythonが固定引数配列でFFmpeg / ffprobeを起動する。
+
+### 変更内容・決定
+
+- upstream FFmpeg `8.1.2` sourceを固定し、universal2、必要機能限定、LGPL互換configureで構築する。
+- source SHA-256、build toolchain、configure、完成した`ffmpeg` / `ffprobe`のSHA-256を一体で固定する。
+- 製品Bundleでは`Contents/MacOS/ffmpeg`と`Contents/MacOS/ffprobe`へ配置し、各実行物をad-hoc署名してから外側appを署名する。
+- SwiftがBundle固定相対位置から絶対pathを導出してPythonへ渡す。Pythonは通常ファイル、実行権限、Bundle配下であることをfail-closedで検証し、`shell=False`、固定引数配列、PATH探索なしで起動する。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`ARCHITECTURE.md`、`GATE_REGISTER.md`、`UNDECIDED_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 7A。Stage 7BはStage 7Aで固定・検証した実行物とpath契約だけを使用する。Stage 6のPython runtime契約は変更しない。
+
+### 置換関係
+
+過去記録の「配布時FFmpeg / ffprobe配置は未決定」は当時の歴史的記録として保持し、現行仕様は本決定で置換する。App Sandbox、AI依存、export codecは変更しない。
+
+### 再検証範囲
+
+upstream source取得元・SHA-256、universal2、固定toolchain・configure、LGPL互換性、完成binary SHA-256、Bundle固定配置、署名、ffmpeg / ffprobeのversion・起動、shell・PATH・network非依存、既存Stage 7B経路との互換性をStage 7Aで限定検証する。
+
+### Gate判定
+
+事前決定は完了した。source SHA-256、build toolchain、configure、完成binary SHA-256の固定とBundle内限定検証が未完了のため、Stage 7A開始GateはFAILのままとする。
+
+---
+
+## 2026-08-12：Stage 7A source署名・toolchain・universal2 build契約
+
+### 問題
+
+FFmpeg 8.1.2 sourceのdetached signature検証tool、deployment target、LGPL互換configure、universal2 build方式が未決定だった。
+
+### 根拠
+
+- source SHA-256は確認済みだが、提供された公式署名と鍵による真正性検証が未完了である。
+- projectはdeployment targetを明示しておらず、FFmpeg buildの再現可能な入力として固定値が必要である。
+- 現仕様はMP4内のaudio codecを限定しておらず、decoderを推測で削減できない。
+
+### 変更内容・決定
+
+- Homebrew GnuPGを使用し、導入時のexact versionを固定する。一時`GNUPGHOME`へ`ffmpeg-devel.asc`だけをimportし、鍵fingerprintを実測固定後、detached signatureをfail-closed検証する。
+- FFmpeg buildのdeployment targetをmacOS 11.0に固定する。製品アプリのminimum macOS最終決定はStage 27に維持する。
+- toolchainをXcode 26.6（17F113）、Apple clang 21.0.0、macOS SDK 26.5に固定する。
+- 共通configureは`--target-os=darwin --disable-autodetect --disable-network --disable-doc --disable-debug --disable-ffplay --disable-shared --enable-static --disable-programs --enable-ffmpeg --enable-ffprobe --disable-encoders --enable-encoder=pcm_s16le --disable-muxers --enable-muxer=wav --disable-indevs --disable-outdevs --disable-gpl --disable-nonfree`とする。現仕様でcodec未限定のため内蔵audio decoder群は削減しない。
+- arm64 / x86_64を同一設定、SDK、deployment targetで個別buildし、完成した各archの`ffmpeg` / `ffprobe`を`lipo -create`でuniversal2化する。
+
+### 影響正本
+
+`DEPENDENCY_VERSIONS.md`、`MODEL_AND_TOOLING.md`、`GATE_REGISTER.md`、`UNDECIDED_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 7A。Stage 27の製品アプリminimum macOS決定は変更しない。
+
+### 再検証範囲
+
+GnuPG exact version、鍵fingerprint、detached signature、configure出力、各archとuniversal2構成、macOS 11.0 load command、完成binary SHA-256、LGPL構成、Bundle固定配置・署名・起動・offlineをStage 7Aで限定検証する。
+
+### Gate判定
+
+事前決定は完了した。GnuPG実測値とsource署名、build・binary固定、Bundle限定検証が未完了のためStage 7A開始GateはFAILのままとする。
+
+### 限定検証結果
+
+- GnuPG `2.5.21`とfingerprint `FCF986EA15E6E293A5644F10B4322F04D67658D8`を固定し、隔離keyringと`gpgv`でFFmpeg 8.1.2 detached signatureをfail-closed検証した。
+- Xcode 26.6、Apple clang 21.0.0、macOS SDK 26.5、deployment target macOS 11.0、LGPL互換configureでarm64 / x86_64 buildが成功し、`lipo`でuniversal2化した。
+- ad-hoc署名済み`ffmpeg`のSHA-256は`b54274779b2d3de25aefc1c7b1df3a7ab65fca3dbdd2ad57cb9ccab109915d67`、`ffprobe`は`a5b19683c2caacd408e57ac3322e56c1dde571bf0c1a565631f9a63bb5d33de2`である。
+- `Contents/MacOS`相当の固定位置から両binaryのversion 8.1.2起動と署名整合性を確認した。networkはconfigureで無効、依存はsystem frameworkのみで、PATH探索を使用しない。
+
+### 最終Gate判定
+
+事前決定と限定技術検証が完了し、未決定・Blockerが解消したためStage 7A開始GateをPASSとする。
+
+---
+
+## 2026-08-12：Stage 7B FFmpeg正式入力・Bundle組込み方式
+
+### 問題
+
+Stage 7Aで検証したsourceとuniversal2 binaryが一時領域にあり、再現可能な製品入力の保管場所、Git LFS範囲、通常Buildでの利用方式が未決定だった。
+
+### 根拠
+
+- source SHA・detached signature、固定toolchainによるuniversal2 build、完成binary SHA、Bundle位置相当からのoffline起動はPASS済みである。
+- `tmp_vendor_input`と一時build領域はGitHub共有正本および製品Build入力にできない。
+- 毎回のsource buildは通常Buildを不必要に長時間化する一方、検証済みbinaryと再現検証工程を分離すれば完全offlineと再現可能性を維持できる。
+
+### 変更内容・決定
+
+- source archive、detached signature、signing keyを`vendor/ffmpeg/8.1.2/source/`へ集約する。
+- 検証済みuniversal2 `ffmpeg`・`ffprobe`を`vendor/ffmpeg/8.1.2/universal2/bin/`へ保管する。
+- Git LFS対象は`ffmpeg-8.1.2.tar.xz`、`ffmpeg`、`ffprobe`の完全一致3ファイルだけとし、署名と鍵は通常Git管理する。
+- `SHA256SUMS`、`SOURCE.md`、`LICENSE.md`、`BUILD.md`を通常Gitで併置し、source、署名、fingerprint、toolchain、configure、各architecture build、`lipo`、署名順序を一体で固定する。
+- 通常のXcode BuildはLFS実体、SHA-256、universal2 architecture、実行権限をfail-closed確認した検証済みbinaryを`Contents/MacOS`へコピーして署名する。source再buildは独立した再現検証scriptでのみ行う。
+
+### 影響正本
+
+`MODEL_AND_TOOLING.md`、`DEPENDENCY_VERSIONS.md`、`ARCHITECTURE.md`、`GATE_REGISTER.md`、`CURRENT_STATUS.md`。
+
+### 影響Stage
+
+Stage 7A、Stage 7B。FFmpeg version、configure、音声抽出仕様および後続Stageの音声入力契約は変更しない。
+
+### 再検証範囲
+
+vendor artifactのSHA・LFS実体・architecture・実行権限、Xcode Bundle配置・署名、Swift固定path、PythonのBundle配下・通常ファイル・実行権限検証、PATH非依存、既存Stage 7B主要ケースを限定再検証する。
+
+### Gate判定
+
+保管・Build入力方式が一意に決定し、Stage 7Aと既存の解析WAV契約が成立しているため、Stage 7B開始GateをPASSとする。

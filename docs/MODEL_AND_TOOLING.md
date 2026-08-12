@@ -16,9 +16,16 @@
 - 後続依存は各Gateで別途固定する。
 
 ## FFmpeg
-- 開発時と製品配布時の配置方式を明示。
-- versionを記録。
-- path探索を無制限に行わない。
+- upstream FFmpeg `8.1.2` sourceを固定し、universal2、必要機能限定、LGPL互換configureで再現可能に構築する。
+- source SHA-256、build toolchain、configure、完成した`ffmpeg` / `ffprobe`のSHA-256を固定する。
+- toolchainはXcode 26.6（17F113）、Apple clang 21.0.0、macOS SDK 26.5、deployment target macOS 11.0に固定する。arm64 / x86_64を同一設定で個別buildし、`lipo -create`でuniversal2化する。
+- configureはautodetect・network・doc・debug・ffplay・shared library・不要program・外部入出力device・GPL・nonfreeを無効化し、static、ffmpeg、ffprobe、PCM s16le encoder、WAV muxerを有効化する。内蔵audio decoder群は削減しない。
+- source署名はHomebrew GnuPGのexact versionを固定し、一時`GNUPGHOME`へ`ffmpeg-devel.asc`だけをimportして固定fingerprintを確認後、detached signatureをfail-closed検証する。
+- 正式入力は`vendor/ffmpeg/8.1.2/`へ集約する。`source/`のsource archiveだけをGit LFS管理し、detached signatureとsigning keyは通常Git管理する。
+- 検証済みuniversal2 binaryは`vendor/ffmpeg/8.1.2/universal2/bin/`へ置き、`ffmpeg`と`ffprobe`だけをGit LFS管理する。`SHA256SUMS`、`SOURCE.md`、`LICENSE.md`、`BUILD.md`は通常Git管理する。
+- 通常のXcode BuildではLFS実体、固定SHA-256、universal2 architecture、実行権限をfail-closed確認して検証済みbinaryを使用する。sourceからの再buildは独立した再現検証scriptに限定し、通常Buildでは行わない。
+- 製品Bundleでは`Contents/MacOS/ffmpeg`と`Contents/MacOS/ffprobe`へ配置し、各実行物をad-hoc署名してから外側appを署名する。
+- SwiftがBundle固定相対位置から絶対pathを導出してPythonへ渡す。Pythonは通常ファイル、実行権限、Bundle配下であることを検証し、`shell=False`、固定引数配列、PATH探索なしで起動する。
 
 ## AIモデル
 - model_id

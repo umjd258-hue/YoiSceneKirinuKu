@@ -32,3 +32,7 @@
 Gate未通過なら該当Stage本実装禁止。数値を推測してGateを突破しない。
 
 Stage 6は事前決定に加え、Bundle同梱の固定相対位置からの起動、strict JSON Lines、stdout/stderr分離、Python audit hook、`lsof -i`5回、stdlib限定、Swift network API不使用、PATH・download・user site非依存を限定検証したため開始Gate PASS。`lsof -i`は反復時点の観測であり、Python外の極短時間socketの連続監視ではない。
+
+Stage 7AはGnuPG 2.5.21、固定fingerprintによるFFmpeg 8.1.2 source署名、Xcode 26.6・clang 21.0.0・SDK 26.5・macOS 11.0、arm64 / x86_64個別build、`lipo`によるuniversal2、LGPL互換configure、完成binary SHA-256、ad-hoc署名、Bundle固定位置相当からの8.1.2起動を限定検証済み。network無効、system frameworkのみ、PATH探索なしを確認したためGate PASSとする。
+
+Stage 7Bは16kHz mono PCM s16le WAV、partial、正式化、再利用、音声なし・FFmpeg失敗時のfail-closed契約が既存正本と実装で確定済みであり、前提Stage 7AもPASSしたため開始Gate PASSとする。実装ではStage 7Aの固定vendor binaryとBundle path契約だけを使用する。

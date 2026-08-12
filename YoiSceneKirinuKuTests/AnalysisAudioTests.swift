@@ -2,6 +2,24 @@ import XCTest
 @testable import YoiSceneKirinuKu
 
 final class AnalysisAudioTests: XCTestCase {
+    func testBundledConfigurationUsesFixedApplicationPaths() throws {
+        let configuration = try XCTUnwrap(AnalysisAudioConfiguration.bundled())
+        XCTAssertEqual(
+            configuration.ffmpegExecutableURL.path,
+            configuration.bundleRootURL.appendingPathComponent("Contents/MacOS/ffmpeg").path
+        )
+        XCTAssertEqual(
+            configuration.ffprobeExecutableURL.path,
+            configuration.bundleRootURL.appendingPathComponent("Contents/MacOS/ffprobe").path
+        )
+        XCTAssertEqual(
+            configuration.pythonExecutableURL.path,
+            configuration.bundleRootURL.appendingPathComponent(
+                "Contents/Frameworks/Python.framework/Versions/3.13/bin/python3.13"
+            ).path
+        )
+    }
+
     func testProtocolParserAcceptsVerifiedSuccessfulResult() {
         let requestID = UUID()
         let output = """

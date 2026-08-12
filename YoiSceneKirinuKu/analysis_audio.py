@@ -76,14 +76,30 @@ def exact(value: dict[str, Any], keys: set[str], code: str) -> None:
         raise AudioFailure(code)
 
 
-def executable(raw: Any) -> Path:
-    if not isinstance(raw, str) or not raw.startswith("/"):
+def bundled_executable(raw: Any, raw_bundle: Any, expected_name: str) -> Path:
+    if (
+        not isinstance(raw, str) or not raw.startswith("/")
+        or not isinstance(raw_bundle, str) or not raw_bundle.startswith("/")
+    ):
         raise AudioFailure("analysis_audio_job_invalid")
-    path = Path(raw).resolve(strict=True)
-    metadata = path.stat()
-    if not stat.S_ISREG(metadata.st_mode) or not os.access(path, os.X_OK):
+    path = Path(raw)
+    try:
+        bundle = Path(raw_bundle).resolve(strict=True)
+        expected = bundle / "Contents" / "MacOS" / expected_name
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+        expected_resolved = expected.resolve(strict=True)
+    except OSError as error:
+        raise AudioFailure("analysis_audio_job_invalid") from error
+    if (
+        not bundle.is_dir()
+        or path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or not os.access(resolved, os.X_OK)
+        or resolved != expected_resolved
+    ):
         raise AudioFailure("analysis_audio_job_invalid")
-    return path
+    return resolved
 
 
 def source_duration(ffprobe: Path, source: Path) -> tuple[int, int]:
@@ -220,14 +236,14 @@ def generate(
 ) -> dict[str, Any]:
     exact(request, {
         "protocol_version", "request_id", "workspace_root", "job_id",
-        "ffmpeg_path", "ffprobe_path",
+        "bundle_root", "ffmpeg_path", "ffprobe_path",
     }, "analysis_audio_job_invalid")
     if request["protocol_version"] != 1:
         raise AudioFailure("analysis_audio_job_invalid")
     request_id = jobs.canonical_uuid(request["request_id"], "analysis_audio_job_invalid")
     job_id = jobs.canonical_uuid(request["job_id"], "analysis_audio_job_invalid")
-    ffmpeg = executable(request["ffmpeg_path"])
-    ffprobe = executable(request["ffprobe_path"])
+    ffmpeg = bundled_executable(request["ffmpeg_path"], request["bundle_root"], "ffmpeg")
+    ffprobe = bundled_executable(request["ffprobe_path"], request["bundle_root"], "ffprobe")
     try:
         workspace = jobs.prepare_workspace(request["workspace_root"])
     except jobs.JobFailure as error:

@@ -8,7 +8,6 @@
 | Embedding model/version/preprocess | Stage 8A開始Gate |
 | 複数sample representation更新規則 | Stage 8C開始Gate |
 | 人物削除rollback/ownership | Stage 8開始Gate |
-| FFmpeg/ffprobe exact build/version | Stage 7A開始Gate |
 | VAD方式/parameter | Stage 11開始Gate |
 | candidate merge/split/padding | Stage 12開始Gate |
 | speaker score定義 | Stage 13開始Gate |

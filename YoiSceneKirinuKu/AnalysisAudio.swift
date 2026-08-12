@@ -34,22 +34,23 @@ struct AnalysisAudioConfiguration: Sendable {
     let scriptURL: URL
     let ffmpegExecutableURL: URL
     let ffprobeExecutableURL: URL
+    let bundleRootURL: URL
     let workspaceRootURL: URL
 
     static func bundled(bundle: Bundle = .main, fileManager: FileManager = .default) -> AnalysisAudioConfiguration? {
         guard
-            let python = bundle.object(forInfoDictionaryKey: "AnalysisAudioPythonExecutable") as? String,
-            let ffmpeg = bundle.object(forInfoDictionaryKey: "AnalysisAudioFFmpegExecutable") as? String,
-            let ffprobe = bundle.object(forInfoDictionaryKey: "AnalysisAudioFFprobeExecutable") as? String,
-            !python.isEmpty, !ffmpeg.isEmpty, !ffprobe.isEmpty,
             let script = bundle.url(forResource: "analysis_audio", withExtension: "py"),
             let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
+        let bundleRoot = bundle.bundleURL
         return AnalysisAudioConfiguration(
-            pythonExecutableURL: URL(fileURLWithPath: python),
+            pythonExecutableURL: bundleRoot.appendingPathComponent(
+                "Contents/Frameworks/Python.framework/Versions/3.13/bin/python3.13"
+            ),
             scriptURL: script,
-            ffmpegExecutableURL: URL(fileURLWithPath: ffmpeg),
-            ffprobeExecutableURL: URL(fileURLWithPath: ffprobe),
+            ffmpegExecutableURL: bundleRoot.appendingPathComponent("Contents/MacOS/ffmpeg"),
+            ffprobeExecutableURL: bundleRoot.appendingPathComponent("Contents/MacOS/ffprobe"),
+            bundleRootURL: bundleRoot,
             workspaceRootURL: applicationSupport
                 .appendingPathComponent("local.YoiSceneKirinuKu", isDirectory: true)
                 .appendingPathComponent("workspace", isDirectory: true)
@@ -82,6 +83,7 @@ final class AnalysisAudioService: AnalysisAudioServicing, @unchecked Sendable {
             "request_id": requestID.uuidString.lowercased(),
             "workspace_root": configuration.workspaceRootURL.path,
             "job_id": jobID.uuidString.lowercased(),
+            "bundle_root": configuration.bundleRootURL.path,
             "ffmpeg_path": configuration.ffmpegExecutableURL.path,
             "ffprobe_path": configuration.ffprobeExecutableURL.path,
         ]

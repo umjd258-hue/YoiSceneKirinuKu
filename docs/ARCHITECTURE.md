@@ -40,7 +40,11 @@ schema/内容/必要ファイルを検証後に正式化。
 
 ## 配置
 - Python/FFmpeg/AIモデルの開発時配置と製品配布時配置を分離して定義する。
-- Pythonの製品配置はStage 6で正本化済み。FFmpeg/AIモデルの配置方式は対応するStage Gateで正本化する。
+- Pythonの製品配置はStage 6で正本化済み。FFmpeg / ffprobeはupstream `8.1.2`の固定sourceからuniversal2・必要機能限定・LGPL互換configureで構築し、`Contents/MacOS/ffmpeg`と`Contents/MacOS/ffprobe`へ配置する。実行物を内側からad-hoc署名し、最後にappを署名する。
+- FFmpegのsource・署名・鍵・検証済みbinary・manifest・ライセンス・build条件は`vendor/ffmpeg/8.1.2/`へ集約する。大容量のsource archiveと完成binary 2件だけをGit LFS管理する。
+- 通常Buildは検証済みbinaryをfail-closed検証してBundleへ組み込み、source再buildは独立した再現検証scriptに限定する。
+- SwiftがBundle固定相対位置からFFmpeg / ffprobeの絶対pathを導出してPythonへ渡す。Pythonは通常ファイル、実行権限、Bundle配下を検証し、`shell=False`、固定引数配列、PATH探索なしで起動する。
+- AIモデルの配置方式は対応するStage Gateで正本化する。
 - App Sandbox採否、Security Scoped Bookmark等の外部ストレージアクセス方式もGateで確定する。
 
 ## 初期版の軽量化制約
